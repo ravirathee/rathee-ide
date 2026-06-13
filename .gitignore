@@ -1,0 +1,7 @@
+.DS_Store
+workspace/main.py
+workspace/main.cpp
+workspace/main.out
+workspace/main.out.dSYM/
+workspace/input.txt
+workspace/output.txt

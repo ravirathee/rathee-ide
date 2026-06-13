@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rathee IDE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell" data-layout="vertical">
+      <header class="topbar">
+        <div class="brand">
+          <button id="menuBtn" class="icon-button menu-button" title="Open files">☰</button>
+          <div class="brand-mark">R</div>
+          <div>
+            <h1>Rathee IDE</h1>
+            <p>Best Competitive Coding IDE</p>
+          </div>
+        </div>
+        <div class="toolbar">
+          <label class="contest-wrap" title="Codeforces contest URL">
+            <span>Codeforces</span>
+            <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
+          </label>
+          <button id="importContestBtn">Import</button>
+          <button id="cfSubmitBtn">Submit</button>
+          <button id="cfStatusBtn">Status</button>
+          <div class="font-controls" title="Editor font size">
+            <button id="fontDownBtn" class="icon-button" aria-label="Decrease font size">A-</button>
+            <span id="fontSizeLabel">15px</span>
+            <button id="fontUpBtn" class="icon-button" aria-label="Increase font size">A+</button>
+          </div>
+          <button id="runBtn" class="primary">Run</button>
+          <button id="debugBtn">Debug</button>
+          <button id="layoutToggleBtn" class="layout-toggle" title="Toggle split layout">Split ↔</button>
+          <label class="select-wrap" title="Language">
+            <span>Language</span>
+            <select id="language">
+              <option value="python">Python 3</option>
+              <option value="cpp" selected>C++17</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <aside id="sideDrawer" class="side-drawer" hidden>
+        <div class="drawer-head">
+          <span>Files</span>
+          <button id="drawerCloseBtn" class="small-button">Close</button>
+        </div>
+        <button id="codeFileBtn" class="drawer-item active">Problem Code</button>
+        <button id="templateBundleBtn" class="drawer-item">Template + Headers</button>
+      </aside>
+
+      <section class="workspace">
+        <section class="editor-pane">
+          <div class="editor-top">
+            <div id="fileTabs" class="file-tabs" aria-label="C++ files"></div>
+            <div class="editor-actions">
+              <button id="saveTemplateBtn" class="small-button dirty-action" hidden>Save</button>
+              <button id="resetCodeBtn" class="small-button">Reset Code</button>
+              <span id="statusPill" class="status idle">Idle</span>
+            </div>
+          </div>
+          <textarea id="code" spellcheck="false" wrap="off" aria-label="Code editor"></textarea>
+        </section>
+
+        <section class="io-pane">
+          <div class="io-section input-section">
+            <div class="pane-head">
+              <span>input.txt</span>
+            </div>
+            <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
+          </div>
+          <div class="io-section output-section">
+            <div class="pane-head">
+              <span>output.txt</span>
+              <button id="debugToggle" class="small-button" title="Show debugger diagnostics">Debugger</button>
+            </div>
+            <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
+          </div>
+          <div id="debugDrawer" class="debug-drawer" hidden>
+            <div class="pane-head">
+              <span>Debugger</span>
+              <button id="debugClose" class="small-button" title="Close debugger">Close</button>
+            </div>
+            <pre id="debug" class="debug-panel" aria-label="Debug output"></pre>
+          </div>
+        </section>
+      </section>
+
+      <footer class="statusbar">
+        <span id="meta">Ready</span>
+        <span>input.txt → stdin · stdout → output.txt</span>
+      </footer>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
