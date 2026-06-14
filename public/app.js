@@ -75,8 +75,12 @@ const els = {
   drawerCloseBtn: document.querySelector("#drawerCloseBtn"),
   codeFileBtn: document.querySelector("#codeFileBtn"),
   templateBundleBtn: document.querySelector("#templateBundleBtn"),
+  savedContestSection: document.querySelector("#savedContestSection"),
+  savedContestList: document.querySelector("#savedContestList"),
   language: document.querySelector("#language"),
   code: document.querySelector("#code"),
+  emptyEditorState: document.querySelector("#emptyEditorState"),
+  createFirstFileBtn: document.querySelector("#createFirstFileBtn"),
   input: document.querySelector("#input"),
   output: document.querySelector("#output"),
   debug: document.querySelector("#debug"),
@@ -101,44 +105,53 @@ const els = {
 };
 
 let busy = false;
-let cppFileNames = Array.from({ length: 10 }, (_, index) => `${String.fromCharCode(65 + index)}.cpp`);
-let cppFiles = Object.fromEntries(cppFileNames.map((name) => [name, examples.cpp]));
-let cppInputs = Object.fromEntries(cppFileNames.map((name) => [name, ""]));
-let cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
+let cppFileNames = [];
+let cppFiles = {};
+let cppInputs = {};
+let cppTabLabels = {};
 let cppProblems = {};
 let activeCppFile = "A.cpp";
+let codeFileScope = "workspace";
+let activeContestDir = "";
 let pythonCode = examples.python;
 let pythonInput = "";
 let editorView = "code";
 let cppTemplate = examples.cpp;
 let cppHeaders = examples.headers;
 let templateDirty = false;
+let recentContest = JSON.parse(localStorage.getItem("rathee.recentContest") || "null");
+let savedContests = [];
 const codeforcesHandle = "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
 let codeEditor = null;
 let settingEditorValue = false;
+let codeSaveTimer = null;
 
 boot();
 
 function boot() {
   renderFileTabs();
   initCodeEditor();
-  setEditorCode(examples.cpp);
+  activeCppFile = "";
+  cppFileNames = [];
+  cppFiles = {};
+  setEditorCode("");
   els.input.value = "";
   els.language.addEventListener("change", switchLanguage);
   els.runBtn.addEventListener("click", () => submit("run"));
   els.debugBtn.addEventListener("click", () => submit("debug"));
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
-  els.codeFileBtn.addEventListener("click", () => switchEditorView("code"));
+  els.codeFileBtn.addEventListener("click", openProblemCode);
   els.templateBundleBtn.addEventListener("click", () => switchEditorView("template"));
+  els.createFirstFileBtn.addEventListener("click", createFirstCppFile);
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
   els.cfStatusBtn.addEventListener("click", () => refreshCodeforcesStatus(true));
   els.fontDownBtn.addEventListener("click", () => adjustEditorFontSize(-1));
   els.fontUpBtn.addEventListener("click", () => adjustEditorFontSize(1));
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
-  els.resetCodeBtn.addEventListener("click", resetActiveCode);
+  els.resetCodeBtn.addEventListener("click", handleEditorAction);
   els.contestUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") importContest();
   });
@@ -147,8 +160,11 @@ function boot() {
   els.debugClose.addEventListener("click", () => showDebug(false));
   setEditorFontSize(editorFontSize);
   codeEditor?.on("change", handleEditorChange);
+  updateEditorActionButton();
+  updateEditorEmptyState();
+  loadSavedContestList();
   loadWorkspaceFiles();
-  loadTemplateFiles();
+  loadTemplateFiles().then(loadWorkspaceCppFiles);
 }
 
 async function loadWorkspaceFiles() {
@@ -159,6 +175,75 @@ async function loadWorkspaceFiles() {
   } catch {
     // The editor still works if previous run files are unavailable.
   }
+}
+
+async function loadWorkspaceCppFiles() {
+  try {
+    const res = await fetch(`/api/workspace-cpp-files?ts=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load workspace C++ files.");
+
+    if (data.files?.length) {
+      codeFileScope = "workspace";
+      activeContestDir = "";
+      cppFileNames = data.files.map((file) => file.filename);
+      cppFiles = Object.fromEntries(data.files.map((file) => [file.filename, file.code]));
+    } else {
+      codeFileScope = "workspace";
+      activeContestDir = "";
+      cppFileNames = [];
+      cppFiles = {};
+    }
+
+    cppInputs = Object.fromEntries(cppFileNames.map((name) => [name, ""]));
+    cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
+    cppProblems = Object.fromEntries(cppFileNames.map((name) => [name, null]));
+    activeCppFile = cppFileNames.includes(activeCppFile) ? activeCppFile : cppFileNames[0] || "";
+
+    if (editorView === "code" && els.language.value === "cpp") {
+      renderFileTabs();
+      setEditorCode(activeCppFile ? cppFiles[activeCppFile] : "");
+      updateEditorEmptyState();
+    }
+  } catch (error) {
+    els.meta.textContent = error.message || "Could not load workspace C++ files";
+  }
+}
+
+async function saveWorkspaceCppFile(filename, code) {
+  await fetch("/api/workspace-cpp-files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, code })
+  });
+}
+
+async function saveContestCppFile(filename, code) {
+  if (!activeContestDir) return;
+  await fetch("/api/codeforces/contest-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contestDir: activeContestDir, filename, code })
+  });
+}
+
+function scheduleWorkspaceCodeSave() {
+  if (editorView !== "code" || els.language.value !== "cpp" || !activeCppFile) return;
+  clearTimeout(codeSaveTimer);
+  const filename = activeCppFile;
+  const code = cppFiles[filename];
+  codeSaveTimer = setTimeout(() => {
+    const save = codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
+    save(filename, code).catch(() => {
+      els.meta.textContent = `Could not save ${filename}`;
+    });
+  }, 350);
+}
+
+async function deleteWorkspaceCppFile(filename) {
+  await fetch(`/api/workspace-cpp-files?filename=${encodeURIComponent(filename)}`, {
+    method: "DELETE"
+  });
 }
 
 async function loadTemplateFiles() {
@@ -221,6 +306,9 @@ function handleEditorChange() {
   if (settingEditorValue) return;
   if (editorView === "template" || editorView === "headers") {
     saveCurrentState({ markDirty: true });
+  } else if (editorView === "code" && els.language.value === "cpp" && activeCppFile) {
+    cppFiles[activeCppFile] = getEditorCode();
+    scheduleWorkspaceCodeSave();
   }
 }
 
@@ -269,6 +357,12 @@ function setEditorCode(value) {
   }
 }
 
+function updateEditorEmptyState() {
+  const empty = editorView === "code" && els.language.value === "cpp" && !activeCppFile;
+  els.emptyEditorState.hidden = !empty;
+  codeEditor?.setOption("readOnly", empty ? "nocursor" : false);
+}
+
 function setEditorLanguage(language) {
   if (!codeEditor) return;
   codeEditor.setOption("mode", language === "python" ? "python" : "text/x-c++src");
@@ -282,17 +376,110 @@ function switchLanguage() {
   editorView = "code";
   updateDrawerActiveItem();
   setEditorLanguage(language);
-  setEditorCode(language === "python" ? pythonCode : cppFiles[activeCppFile]);
+  setEditorCode(language === "python" ? pythonCode : activeCppFile ? cppFiles[activeCppFile] : "");
   els.input.value = language === "python" ? pythonInput : cppInputs[activeCppFile];
+  updateEditorEmptyState();
+  updateEditorActionButton();
   setStatus("Idle", "idle");
 }
 
+function openProblemCode() {
+  switchEditorView("code");
+  loadWorkspaceCppFiles();
+}
+
 function toggleDrawer() {
-  showDrawer(els.sideDrawer.hidden);
+  const nextVisible = els.sideDrawer.hidden;
+  showDrawer(nextVisible);
+  if (nextVisible) loadSavedContestList();
 }
 
 function showDrawer(visible) {
   els.sideDrawer.hidden = !visible;
+}
+
+async function loadSavedContestList() {
+  try {
+    const res = await fetch(`/api/codeforces/contests?ts=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load saved contests.");
+    savedContests = data.contests || [];
+    renderSavedContests();
+  } catch (error) {
+    els.meta.textContent = error.message || "Could not refresh saved contests";
+  }
+}
+
+function renderSavedContests() {
+  els.savedContestList.innerHTML = "";
+  if (!savedContests.length) {
+    els.savedContestSection.hidden = true;
+    return;
+  }
+  els.savedContestSection.hidden = false;
+  for (const contest of savedContests) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "drawer-item saved-contest-btn";
+    button.textContent = formatRecentContestName(contest);
+    button.title = `${contest.name}${contest.problemCount ? ` · ${contest.problemCount} problems` : ""}`;
+    button.addEventListener("click", () => loadSavedContest(contest));
+    els.savedContestList.append(button);
+  }
+}
+
+function formatRecentContestName(contest) {
+  const name = shortenContestName(contest.name || contest.url);
+  return contest.contestId ? `${name} - ${contest.contestId}` : name;
+}
+
+function shortenContestName(name) {
+  return String(name)
+    .replace(/\bEducational\b/g, "Edu")
+    .replace(/\bCodeforces\b/g, "CF")
+    .replace(/\(Rated for Div\.?\s*2\)/gi, "Div2")
+    .replace(/Rated for Div\.?\s*2/gi, "Div2")
+    .replace(/\bDiv\.?\s*2\b/gi, "Div2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function loadSavedContest(contest) {
+  if (!contest?.contestDir && !contest?.contestId) return;
+  if (contest.contestId) {
+    els.contestUrl.value = `https://codeforces.com/contest/${contest.contestId}`;
+  }
+  showDrawer(false);
+  saveCurrentState();
+  setImportBusy(true);
+  setStatus("Loading", "idle");
+  els.meta.textContent = "Loading saved contest from workspace...";
+
+  try {
+    const params = new URLSearchParams({
+      language: els.language.value,
+      contestDir: contest.contestDir || "",
+      contestId: contest.contestId || ""
+    });
+    const res = await fetch(`/api/codeforces/contest?${params}`, { cache: "no-store" });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Could not load saved contest.");
+    recentContest = {
+      url: contest.contestId ? `https://codeforces.com/contest/${contest.contestId}` : "",
+      name: result.name || contest.name,
+      contestId: result.contestId || contest.contestId,
+      contestDir: result.files?.contestDir || contest.contestDir || ""
+    };
+    localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
+    applyContestProblems(result, { source: "saved" });
+  } catch (error) {
+    els.debug.textContent = error.message;
+    setStatus("Load failed", "error");
+    els.meta.textContent = "Saved contest could not be loaded from workspace";
+    showDebug(true);
+  } finally {
+    setImportBusy(false);
+  }
 }
 
 function switchEditorView(view) {
@@ -305,6 +492,8 @@ function switchEditorView(view) {
   setEditorCode(getCurrentEditorBuffer());
   updateDrawerActiveItem();
   renderFileTabs();
+  updateEditorEmptyState();
+  updateEditorActionButton();
   showDrawer(false);
   setStatus(view === "headers" ? "Headers.hpp" : view === "template" ? "Template.cpp" : "Code", "idle");
 }
@@ -339,13 +528,116 @@ function renderFileTabs() {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "file-tab";
-    tab.textContent = cppTabLabels[filename] || filename;
     tab.title = cppTabLabels[filename] || filename;
     tab.dataset.file = filename;
+    const label = document.createElement("span");
+    label.textContent = cppTabLabels[filename] || filename;
+    const close = document.createElement("span");
+    close.className = "tab-close";
+    close.textContent = "×";
+    close.title = `Close ${filename}`;
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeCppFile(filename);
+    });
+    tab.append(label, close);
     tab.addEventListener("click", () => switchCppFile(filename));
     els.fileTabs.append(tab);
   }
+  const addTab = document.createElement("button");
+  addTab.type = "button";
+  addTab.className = "file-tab add-file-tab";
+  addTab.textContent = "+";
+  addTab.title = "Add next C++ file";
+  addTab.addEventListener("click", addNextCppFile);
+  els.fileTabs.append(addTab);
   updateActiveFileTab();
+}
+
+async function closeCppFile(filename) {
+  if (filename === activeCppFile) {
+    clearTimeout(codeSaveTimer);
+    codeSaveTimer = null;
+  } else {
+    saveCurrentState();
+  }
+  const index = cppFileNames.indexOf(filename);
+  cppFileNames = cppFileNames.filter((name) => name !== filename);
+  delete cppFiles[filename];
+  delete cppInputs[filename];
+  delete cppTabLabels[filename];
+  delete cppProblems[filename];
+  if (codeFileScope === "workspace") {
+    await deleteWorkspaceCppFile(filename).catch(() => {
+      els.meta.textContent = `Could not delete ${filename} from TemporaryCPPFiles`;
+    });
+  }
+  if (activeCppFile === filename) {
+    activeCppFile = cppFileNames[Math.max(0, index - 1)] || cppFileNames[0] || "";
+    setEditorCode(activeCppFile ? cppFiles[activeCppFile] : "");
+    els.input.value = activeCppFile ? cppInputs[activeCppFile] || "" : "";
+  }
+  renderFileTabs();
+  updateEditorEmptyState();
+  setStatus("Closed", "idle");
+  els.meta.textContent = `${filename} closed`;
+}
+
+function addNextCppFile() {
+  if (els.language.value !== "cpp") {
+    els.language.value = "cpp";
+    switchLanguage();
+  }
+  saveCurrentState();
+  const filename = nextCppFilename();
+  cppFileNames.push(filename);
+  cppFiles[filename] = cppTemplate;
+  cppInputs[filename] = "";
+  cppTabLabels[filename] = filename;
+  cppProblems[filename] = null;
+  activeCppFile = filename;
+  editorView = "code";
+  renderFileTabs();
+  updateDrawerActiveItem();
+  updateEditorActionButton();
+  setEditorLanguage("cpp");
+  setEditorCode(cppFiles[activeCppFile]);
+  els.input.value = "";
+  updateEditorEmptyState();
+  if (codeFileScope === "workspace") {
+    saveWorkspaceCppFile(filename, cppFiles[filename]).catch(() => {
+      els.meta.textContent = `Could not create ${filename} in TemporaryCPPFiles`;
+    });
+  }
+  setStatus("Created", "success");
+  els.meta.textContent = `${filename} added`;
+}
+
+function createFirstCppFile() {
+  if (cppFileNames.length === 0) {
+    addNextCppFile();
+  }
+}
+
+function nextCppFilename() {
+  const used = new Set(cppFileNames);
+  let index = 1;
+  while (true) {
+    const filename = `${numberToLetters(index)}.cpp`;
+    if (!used.has(filename)) return filename;
+    index += 1;
+  }
+}
+
+function numberToLetters(index) {
+  let value = index;
+  let label = "";
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
 }
 
 function switchCppFile(filename) {
@@ -355,8 +647,10 @@ function switchCppFile(filename) {
   activeCppFile = filename;
   setEditorCode(cppFiles[activeCppFile]);
   els.input.value = cppInputs[activeCppFile] || "";
+  updateEditorEmptyState();
   updateDrawerActiveItem();
   updateActiveFileTab();
+  updateEditorActionButton();
   setStatus("Idle", "idle");
   refreshCodeforcesStatus(false);
 }
@@ -384,8 +678,10 @@ function saveCurrentState(options = {}) {
     pythonCode = value;
     pythonInput = els.input.value;
   } else {
+    if (!activeCppFile) return;
     cppFiles[activeCppFile] = value;
     cppInputs[activeCppFile] = els.input.value;
+    scheduleWorkspaceCodeSave();
   }
 }
 
@@ -406,11 +702,24 @@ async function importContest() {
     const res = await fetch("/api/codeforces/problems", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: contestUrl })
+      body: JSON.stringify({
+        url: contestUrl,
+        language: els.language.value,
+        cppTemplate,
+        pythonTemplate: pythonCode
+      })
     });
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || "Could not import contest.");
     applyContestProblems(result);
+    recentContest = {
+      url: contestUrl,
+      name: result.name || contestUrl,
+      contestId: result.contestId,
+      contestDir: result.files?.contestDir || ""
+    };
+    localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
+    await loadSavedContestList();
   } catch (error) {
     els.debug.textContent = error.message;
     setStatus("Import failed", "error");
@@ -421,10 +730,16 @@ async function importContest() {
   }
 }
 
-function applyContestProblems(contest) {
+function applyContestProblems(contest, options = {}) {
+  const { source = "import" } = options;
   const problems = contest.problems || [];
+  codeFileScope = "contest";
+  activeContestDir = contest.files?.contestDir || recentContest?.contestDir || "";
   cppFileNames = problems.map((problem) => `${problem.index}.cpp`);
-  cppFiles = Object.fromEntries(cppFileNames.map((name) => [name, cppTemplate]));
+  cppFiles = Object.fromEntries(problems.map((problem) => [
+    `${problem.index}.cpp`,
+    problem.code ?? cppTemplate
+  ]));
   cppInputs = Object.fromEntries(problems.map((problem) => [
     `${problem.index}.cpp`,
     problem.samples?.[0]?.input || ""
@@ -449,19 +764,20 @@ function applyContestProblems(contest) {
   setEditorLanguage("cpp");
   setEditorCode(cppFiles[activeCppFile] || examples.cpp);
   els.input.value = cppInputs[activeCppFile] || "";
+  updateEditorEmptyState();
   els.output.value = "";
   const sampleCount = problems.filter((problem) => problem.samples?.length).length;
   els.debug.textContent = [
     contest.name,
-    `${problems.length} problems imported.`,
+    `${problems.length} problems ${source === "saved" ? "loaded from workspace" : "imported"}.`,
     `${sampleCount} sample inputs loaded.`,
-    sampleCount < problems.length
+    source !== "saved" && sampleCount < problems.length
       ? "Some sample inputs could not be fetched because Codeforces problem pages are protected from server-side scraping."
       : ""
   ].filter(Boolean).join("\n");
-  showDebug(sampleCount < problems.length);
-  setStatus("Imported", "success");
-  els.meta.textContent = `${problems.length} problems imported · ${sampleCount} sample inputs loaded`;
+  showDebug(source !== "saved" && sampleCount < problems.length);
+  setStatus(source === "saved" ? "Loaded" : "Imported", "success");
+  els.meta.textContent = `${problems.length} problems ${source === "saved" ? "loaded" : "imported"} · ${sampleCount} sample inputs loaded`;
   refreshCodeforcesStatus(false);
 }
 
@@ -473,17 +789,47 @@ function setLayout(layout) {
 }
 
 async function resetActiveCode() {
-  if (els.language.value !== "cpp" || editorView !== "code") {
+  if (els.language.value !== "cpp" || editorView !== "code" || !activeCppFile) {
     setStatus("Code only", "error");
-    els.meta.textContent = "Reset Code works on C++ problem tabs";
+    els.meta.textContent = activeCppFile ? "Reset Code works on C++ problem tabs" : "Create a C++ file first";
     return;
   }
   const loaded = await reloadTemplateFilesFromWorkspace({ updateVisible: false, resetDirty: true });
   if (!loaded) return;
   cppFiles[activeCppFile] = cppTemplate;
   setEditorCode(cppTemplate);
+  const save = codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
+  await save(activeCppFile, cppTemplate).catch(() => {
+    els.meta.textContent = `Could not save ${activeCppFile} after reset`;
+  });
   setStatus("Reset", "success");
   els.meta.textContent = `${activeCppFile} reset to Template.cpp`;
+}
+
+async function reloadOpenWorkspaceFile() {
+  const loaded = await reloadTemplateFilesFromWorkspace({ updateVisible: true, resetDirty: true });
+  if (!loaded) return;
+  setStatus("Reloaded", "success");
+  els.meta.textContent = `${editorView === "template" ? "Template.cpp" : "Headers.hpp"} reloaded from workspace`;
+}
+
+function handleEditorAction() {
+  if (editorView === "template" || editorView === "headers") {
+    reloadOpenWorkspaceFile();
+  } else {
+    resetActiveCode();
+  }
+}
+
+function updateEditorActionButton() {
+  if (editorView === "template" || editorView === "headers") {
+    const filename = editorView === "template" ? "Template.cpp" : "Headers.hpp";
+    els.resetCodeBtn.textContent = "Reload File";
+    els.resetCodeBtn.title = `Reload ${filename} from workspace`;
+  } else {
+    els.resetCodeBtn.textContent = "Load from Template";
+    els.resetCodeBtn.title = "Load active problem code from Template.cpp";
+  }
 }
 
 function toggleLayout() {
@@ -504,6 +850,11 @@ function setEditorFontSize(size) {
 
 async function submitToCodeforces() {
   saveCurrentState();
+  if (!activeCppFile) {
+    setStatus("No file", "error");
+    els.meta.textContent = "Create a C++ file before submitting";
+    return;
+  }
   const problem = cppProblems[activeCppFile];
   if (els.language.value !== "cpp" || !problem?.contestId || !problem?.index) {
     setStatus("No CF tab", "error");
@@ -535,6 +886,7 @@ async function copyActiveCode() {
 
 function getSubmitCode() {
   if (els.language.value !== "cpp") return getEditorCode();
+  if (!activeCppFile) return "";
   return combineCppSource(cppFiles[activeCppFile] || "");
 }
 
@@ -542,6 +894,7 @@ function getRunCode() {
   if (els.language.value !== "cpp") return getEditorCode();
   saveCurrentState();
   if (editorView === "template" || editorView === "headers") return combineCppSource(cppTemplate);
+  if (!activeCppFile) return "";
   return combineCppSource(cppFiles[activeCppFile] || "");
 }
 
@@ -623,6 +976,11 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
 async function submit(mode) {
   if (busy) return;
   saveCurrentState();
+  if (els.language.value === "cpp" && editorView === "code" && !activeCppFile) {
+    setStatus("No file", "error");
+    els.meta.textContent = "Create a C++ file with + before running";
+    return;
+  }
   busy = true;
   setButtons(false);
   setStatus(mode === "debug" ? "Debugging" : "Running", "idle");

@@ -229,7 +229,7 @@ button:disabled {
   top: 72px;
   left: 16px;
   z-index: 20;
-  width: 230px;
+  width: 310px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -264,6 +264,29 @@ button:disabled {
   border-bottom: 0;
 }
 
+.saved-contests {
+  border-top: 1px solid var(--line);
+}
+
+.drawer-label {
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.saved-contest-list {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.saved-contest-btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   gap: 14px;
@@ -288,6 +311,7 @@ button:disabled {
 }
 
 .editor-pane {
+  position: relative;
   grid-template-rows: auto 1fr;
 }
 
@@ -347,6 +371,9 @@ button:disabled {
 }
 
 .file-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   max-width: 230px;
   min-height: 32px;
@@ -356,6 +383,38 @@ button:disabled {
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
+}
+
+.file-tab > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.tab-close:hover {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.add-file-tab {
+  display: inline-block;
+  width: 34px;
+  padding: 0;
+  text-align: center;
+  font-weight: 900;
+  color: var(--accent);
 }
 
 .pane-head {
@@ -436,6 +495,29 @@ textarea,
 
 .CodeMirror-selected {
   background: rgba(59, 140, 240, 0.34) !important;
+}
+
+.empty-editor-state {
+  position: absolute;
+  inset: 43px 0 0 0;
+  display: grid;
+  place-items: center;
+  background: #111318;
+  z-index: 6;
+}
+
+.empty-editor-state[hidden] {
+  display: none;
+}
+
+.create-file-button {
+  min-height: 56px;
+  padding: 0 28px;
+  border-color: var(--accent);
+  color: #061511;
+  background: var(--accent);
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 .io-section {

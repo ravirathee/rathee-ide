@@ -50,8 +50,12 @@
           <span>Files</span>
           <button id="drawerCloseBtn" class="small-button">Close</button>
         </div>
-        <button id="codeFileBtn" class="drawer-item active">Problem Code</button>
+        <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
         <button id="templateBundleBtn" class="drawer-item">Template + Headers</button>
+        <div id="savedContestSection" class="saved-contests" hidden>
+          <div class="drawer-label">Saved Contests</div>
+          <div id="savedContestList" class="saved-contest-list"></div>
+        </div>
       </aside>
 
       <section class="workspace">
@@ -60,11 +64,14 @@
             <div id="fileTabs" class="file-tabs" aria-label="C++ files"></div>
             <div class="editor-actions">
               <button id="saveTemplateBtn" class="small-button dirty-action" hidden>Save</button>
-              <button id="resetCodeBtn" class="small-button">Reset Code</button>
+              <button id="resetCodeBtn" class="small-button">Load from Template</button>
               <span id="statusPill" class="status idle">Idle</span>
             </div>
           </div>
           <textarea id="code" spellcheck="false" wrap="off" aria-label="Code editor"></textarea>
+          <div id="emptyEditorState" class="empty-editor-state" hidden>
+            <button id="createFirstFileBtn" class="create-file-button">Create A.cpp</button>
+          </div>
         </section>
 
         <section class="io-pane">

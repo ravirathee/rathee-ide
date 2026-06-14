@@ -5,10 +5,7 @@ void func(){
         int temp; cin>>temp;
         vec.push_back(temp);
     }
-    cout<<"hello";
-    q1
 }
-
 
 int main() {
     int t; cin>>t;
