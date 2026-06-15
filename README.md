@@ -1,4 +1,4 @@
-# Forge IDE
+# Rathee IDE - Best Competitive Coding IDE
 
 A dependency-free local browser IDE for competitive programming. It runs Python 3 and C++17, stores stdin in `workspace/input.txt`, and writes stdout to `workspace/output.txt`.
 
