@@ -9,6 +9,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
 const workspaceDir = path.join(__dirname, "workspace");
 const temporaryCppFilesDir = path.join(workspaceDir, "TemporaryCPPFiles");
+const templateCppPath = path.join(workspaceDir, "Template.cpp");
+const headersPath = path.join(workspaceDir, "Headers.hpp");
+const templatePythonPath = path.join(workspaceDir, "Template.py");
 const port = Number(process.env.PORT || 4173);
 const maxBodyBytes = 1024 * 1024;
 const runTimeoutMs = 8000;
@@ -41,21 +44,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/template-files") {
-      const [template, headers] = await Promise.all([
-        readTextIfExists(path.join(workspaceDir, "Template.cpp")),
-        readTextIfExists(path.join(workspaceDir, "Headers.hpp"))
-      ]);
+      const { template, headers, python } = await readTemplateBundle();
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      return sendJson(res, 200, { template, headers });
+      return sendJson(res, 200, { template, headers, python });
     }
 
     if (req.method === "POST" && url.pathname === "/api/template-files") {
       const body = await readJsonBody(req);
       await Promise.all([
-        writeFile(path.join(workspaceDir, "Template.cpp"), String(body.template ?? ""), "utf8"),
-        writeFile(path.join(workspaceDir, "Headers.hpp"), String(body.headers ?? ""), "utf8")
+        writeFile(templateCppPath, String(body.template ?? ""), "utf8"),
+        writeFile(headersPath, String(body.headers ?? ""), "utf8"),
+        writeFile(templatePythonPath, String(body.python ?? ""), "utf8")
       ]);
       return sendJson(res, 200, { ok: true });
     }
@@ -82,11 +83,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/codeforces/problems") {
       const body = await readJsonBody(req);
       const result = await fetchCodeforcesProblems(body.url);
-      const materialized = await materializeContestFiles(result, {
-        language: body.language,
-        cppTemplate: body.cppTemplate,
-        pythonTemplate: body.pythonTemplate
-      });
+      const templates = await readTemplateBundle();
+      const materialized = await materializeContestFiles(result, { language: body.language, templates });
       result.files = materialized;
       return sendJson(res, 200, result);
     }
@@ -172,6 +170,15 @@ function sendJson(res, status, data) {
 
 async function readTextIfExists(filePath) {
   return readFile(filePath, "utf8").catch(() => "");
+}
+
+async function readTemplateBundle() {
+  const [template, headers, python] = await Promise.all([
+    readTextIfExists(templateCppPath),
+    readTextIfExists(headersPath),
+    readTextIfExists(templatePythonPath)
+  ]);
+  return { template, headers, python };
 }
 
 async function listWorkspaceCppFiles() {
@@ -312,7 +319,7 @@ async function fetchCodeforcesStatus({ handle, contestId, index }) {
   return { handle, contestId, index, submissions, latest: submissions[0] || null };
 }
 
-async function materializeContestFiles(contest, { language, cppTemplate, pythonTemplate }) {
+async function materializeContestFiles(contest, { language, templates }) {
   const contestRoot = path.join(workspaceDir, "contests");
   const contestFolderName = safeFolderName(`${contest.contestId}-${contest.name}`);
   const contestDir = path.join(contestRoot, contestFolderName);
@@ -327,7 +334,7 @@ async function materializeContestFiles(contest, { language, cppTemplate, pythonT
     const files = await Promise.all(contest.problems.map((problem) => {
       const filename = `${safeProblemIndex(problem.index)}.py`;
       const filePath = path.join(pythonDir, filename);
-      return writeFile(filePath, String(pythonTemplate || ""), "utf8").then(() => ({
+      return writeFile(filePath, String(templates.python || ""), "utf8").then(() => ({
         problem: problem.index,
         path: path.relative(workspaceDir, filePath)
       }));
@@ -339,7 +346,7 @@ async function materializeContestFiles(contest, { language, cppTemplate, pythonT
   const files = await Promise.all(contest.problems.map((problem) => {
     const filename = `${safeProblemIndex(problem.index)}.cpp`;
     const filePath = path.join(contestDir, filename);
-    return writeFile(filePath, String(cppTemplate || ""), "utf8").then(() => ({
+    return writeFile(filePath, String(templates.template || ""), "utf8").then(() => ({
       problem: problem.index,
       path: path.relative(workspaceDir, filePath)
     }));

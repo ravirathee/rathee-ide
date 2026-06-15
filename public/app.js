@@ -1,80 +1,9 @@
-const examples = {
-  python: `# Reads from input.txt and writes to output.txt through stdin/stdout.
-n = int(input().strip())
-values = list(map(int, input().split()))
-print(sum(values[:n]))
-`,
-  headers: `//#include <bits/stdc++.h>
-#include <vector>
-#include <string>
-#include <iostream>//cin, cout
-#include <set>
-#include <unordered_map>
-#include <map>
-#include <algorithm>
-#include <cmath>
-#include <numeric>
-
-using namespace std;
-`,
-  cpp: `void func(){
-    int n; cin>>n;
-    vector<int> vec;
-    for(int i = 0 ; i < n ; i++){
-        int temp; cin>>temp;
-        vec.push_back(temp);
-    }
-}
-
-
-int main() {
-    int t; cin>>t;
-    while(t--){
-        func();
-    }
-    return 0;
-}
-`
-};
-
-const legacyCppTemplate = `//#include <bits/stdc++.h>
-#include <vector>
-#include <string>
-#include <iostream>//cin, cout
-#include <set>
-#include <unordered_map>
-#include <map>
-#include <algorithm>
-#include <cmath>
-#include <numeric>
-
-using namespace std;
-void func(){
-    int n; cin>>n;
-    vector<int> vec;
-    for(int i = 0 ; i < n ; i++){
-        int temp; cin>>temp;
-        vec.push_back(temp);
-    }
-}
-
-
-int main() {
-    int t; cin>>t;
-    while(t--){
-        func();
-    }
-    return 0;
-}
-`;
-
 const els = {
   app: document.querySelector(".app-shell"),
   menuBtn: document.querySelector("#menuBtn"),
   sideDrawer: document.querySelector("#sideDrawer"),
   drawerCloseBtn: document.querySelector("#drawerCloseBtn"),
   codeFileBtn: document.querySelector("#codeFileBtn"),
-  templateBundleBtn: document.querySelector("#templateBundleBtn"),
   savedContestSection: document.querySelector("#savedContestSection"),
   savedContestList: document.querySelector("#savedContestList"),
   language: document.querySelector("#language"),
@@ -100,6 +29,9 @@ const els = {
   settingsTabs: Array.from(document.querySelectorAll(".settings-tab")),
   editorSettings: document.querySelector("#editorSettings"),
   profileSettings: document.querySelector("#profileSettings"),
+  templateSettings: document.querySelector("#templateSettings"),
+  openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
+  openHeadersFileBtn: document.querySelector("#openHeadersFileBtn"),
   codeforcesHandleInput: document.querySelector("#codeforcesHandleInput"),
   editorFontSizeInput: document.querySelector("#editorFontSizeInput"),
   editorFontSelect: document.querySelector("#editorFontSelect"),
@@ -131,11 +63,11 @@ let cppProblems = {};
 let activeCppFile = "A.cpp";
 let codeFileScope = "workspace";
 let activeContestDir = "";
-let pythonCode = examples.python;
+let pythonCode = "";
 let pythonInput = "";
 let editorView = "code";
-let cppTemplate = examples.cpp;
-let cppHeaders = examples.headers;
+let cppTemplate = "";
+let cppHeaders = "";
 let templateDirty = false;
 let recentContest = JSON.parse(localStorage.getItem("rathee.recentContest") || "null");
 let savedContests = [];
@@ -148,7 +80,7 @@ let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
 let layoutState = {
-  showDrawer: false,
+  showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
   codeSide: localStorage.getItem("rathee.codeSide") || "left",
   showInput: localStorage.getItem("rathee.showInput") !== "false",
@@ -173,7 +105,8 @@ function boot() {
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
   els.codeFileBtn.addEventListener("click", openProblemCode);
-  els.templateBundleBtn.addEventListener("click", () => switchEditorView("template"));
+  els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
+  els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
   els.createFirstFileBtn.addEventListener("click", createFirstCppFile);
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
@@ -309,9 +242,7 @@ async function reloadTemplateFilesFromWorkspace({ updateVisible, resetDirty }) {
     const files = await res.json();
     if (typeof files.template === "string") cppTemplate = files.template;
     if (typeof files.headers === "string") cppHeaders = files.headers;
-    if (typeof files.template !== "string" || typeof files.headers !== "string") {
-      await saveTemplateFilesNow();
-    }
+    if (typeof files.python === "string") pythonCode = files.python;
     if (updateVisible && editorView === "template") setEditorCode(cppTemplate);
     if (updateVisible && editorView === "headers") setEditorCode(cppHeaders);
     if (resetDirty) setTemplateDirty(false);
@@ -327,7 +258,7 @@ async function saveTemplateFilesNow() {
   await fetch("/api/template-files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ template: cppTemplate, headers: cppHeaders })
+    body: JSON.stringify({ template: cppTemplate, headers: cppHeaders, python: pythonCode })
   });
 }
 
@@ -418,7 +349,7 @@ function setEditorLanguage(language) {
 
 function applyWorkspaceLayout() {
   layoutState.drawerWidth = clamp(layoutState.drawerWidth, 220, 420);
-  layoutState.sideWidth = clamp(layoutState.sideWidth, 24, 68);
+  layoutState.sideWidth = clamp(layoutState.sideWidth, 12, 72);
   layoutState.inputHeight = clamp(layoutState.inputHeight, 18, 78);
 
   els.app.dataset.codeSide = layoutState.codeSide;
@@ -426,8 +357,10 @@ function applyWorkspaceLayout() {
   els.app.style.setProperty("--side-width", `${layoutState.sideWidth}%`);
   els.app.style.setProperty("--input-height", `${layoutState.inputHeight}%`);
   els.workspace.classList.toggle("drawer-open", layoutState.showDrawer);
-  els.sideDrawer.hidden = !layoutState.showDrawer;
+  els.sideDrawer.hidden = false;
   els.drawerResizeHandle.hidden = !layoutState.showDrawer;
+  els.menuBtn.title = layoutState.showDrawer ? "Close files" : "Open files";
+  els.menuBtn.setAttribute("aria-label", layoutState.showDrawer ? "Close files" : "Open files");
   const bothHidden = !layoutState.showInput && !layoutState.showOutput;
   els.workspace.classList.toggle("side-hidden", bothHidden);
   els.sidePane.hidden = bothHidden;
@@ -441,8 +374,8 @@ function applyWorkspaceLayout() {
 
   els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
   els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
-  els.hideInputBtn.textContent = layoutState.showInput ? "Hide" : "Show";
-  els.hideOutputBtn.textContent = layoutState.showOutput ? "Hide" : "Show";
+  updatePaneToggleButton(els.hideInputBtn, layoutState.showInput, "input");
+  updatePaneToggleButton(els.hideOutputBtn, layoutState.showOutput, "output");
   localStorage.setItem("rathee.codeSide", layoutState.codeSide);
   localStorage.setItem("rathee.drawerWidth", String(layoutState.drawerWidth));
   localStorage.setItem("rathee.showInput", String(layoutState.showInput));
@@ -451,6 +384,14 @@ function applyWorkspaceLayout() {
   localStorage.setItem("rathee.inputHeight", String(layoutState.inputHeight));
 
   requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function updatePaneToggleButton(button, visible, panelName) {
+  const label = `${visible ? "Hide" : "Show"} ${panelName} panel`;
+  button.textContent = ">";
+  button.classList.toggle("is-collapsed", !visible);
+  button.title = label;
+  button.setAttribute("aria-label", label);
 }
 
 function buildIoRows() {
@@ -491,13 +432,19 @@ function showSettings(visible) {
   els.app.classList.toggle("settings-open", visible);
 }
 
+function openTemplateSettingsFile(view) {
+  showSettings(false);
+  switchEditorView(view);
+}
+
 function switchSettingsTab(tabName) {
-  const target = ["profile", "editor"].includes(tabName) ? tabName : "profile";
+  const target = ["profile", "editor", "templates"].includes(tabName) ? tabName : "profile";
   els.settingsTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.settingsTab === target);
   });
   els.editorSettings.hidden = target !== "editor";
   els.profileSettings.hidden = target !== "profile";
+  els.templateSettings.hidden = target !== "templates";
 }
 
 function setCodeEditorPlacement(side) {
@@ -527,7 +474,7 @@ function startResize(event, target) {
       const delta = layoutState.codeSide === "left"
         ? startX - moveEvent.clientX
         : moveEvent.clientX - startX;
-      layoutState.sideWidth = clamp(startSideWidth + (delta / workspaceRect.width) * 100, 24, 68);
+      layoutState.sideWidth = clamp(startSideWidth + (delta / workspaceRect.width) * 100, 12, 72);
     }
     if (target === "drawer") {
       layoutState.drawerWidth = clamp(startDrawerWidth + (moveEvent.clientX - startX), 220, 420);
@@ -739,7 +686,6 @@ function getCurrentEditorBuffer() {
 
 function updateDrawerActiveItem() {
   els.codeFileBtn.classList.toggle("active", editorView === "code");
-  els.templateBundleBtn.classList.toggle("active", editorView === "template" || editorView === "headers");
 }
 
 function renderFileTabs() {
@@ -937,9 +883,7 @@ async function importContest() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: contestUrl,
-        language: els.language.value,
-        cppTemplate,
-        pythonTemplate: pythonCode
+        language: els.language.value
       })
     });
     const result = await res.json();
@@ -995,7 +939,7 @@ function applyContestProblems(contest, options = {}) {
   updateDrawerActiveItem();
   els.fileTabs.classList.remove("python-mode");
   setEditorLanguage("cpp");
-  setEditorCode(cppFiles[activeCppFile] || examples.cpp);
+  setEditorCode(cppFiles[activeCppFile] || cppTemplate);
   els.input.value = cppInputs[activeCppFile] || "";
   updateEditorEmptyState();
   els.output.value = "";

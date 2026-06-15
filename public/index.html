@@ -12,7 +12,6 @@
     <main class="app-shell" data-code-side="left">
       <header class="topbar">
         <div class="brand">
-          <button id="menuBtn" class="icon-button menu-button" title="Open files">☰</button>
           <div class="brand-mark">R</div>
           <div>
             <h1>Rathee IDE</h1>
@@ -38,24 +37,28 @@
             <label class="contest-wrap" title="Codeforces contest URL">
               <span>Codeforces</span>
               <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
+              <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
             </label>
             <button id="cfStatusBtn">Status</button>
-            <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
           </div>
         </div>
       </header>
 
       <section class="workspace">
-        <aside id="sideDrawer" class="side-drawer" hidden>
-          <div class="drawer-head">
-            <span>Files</span>
-            <button id="drawerCloseBtn" class="drawer-close-button" title="Close drawer" aria-label="Close drawer">&lt;</button>
+        <aside id="sideDrawer" class="side-drawer">
+          <div class="drawer-rail">
+            <button id="menuBtn" class="icon-button menu-button" title="Open files" aria-label="Open files">&gt;</button>
           </div>
-          <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
-          <button id="templateBundleBtn" class="drawer-item">Template + Headers</button>
-          <div id="savedContestSection" class="saved-contests" hidden>
-            <div class="drawer-label">Saved Contests</div>
-            <div id="savedContestList" class="saved-contest-list"></div>
+          <div class="drawer-panel">
+            <div class="drawer-head">
+              <span>Files</span>
+              <button id="drawerCloseBtn" class="drawer-close-button" title="Close drawer" aria-label="Close drawer">&lt;</button>
+            </div>
+            <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
+            <div id="savedContestSection" class="saved-contests" hidden>
+              <div class="drawer-label">Saved Contests</div>
+              <div id="savedContestList" class="saved-contest-list"></div>
+            </div>
           </div>
         </aside>
         <div id="drawerResizeHandle" class="resize-handle vertical-handle drawer-resize-handle" hidden title="Resize files pane"></div>
@@ -82,7 +85,7 @@
           <div class="io-section input-section">
             <div class="pane-head">
               <span>input.txt</span>
-              <button id="hideInputBtn" class="small-button" title="Hide input panel">Hide</button>
+              <button id="hideInputBtn" class="pane-collapse-button input-collapse-button" title="Hide input panel" aria-label="Hide input panel">&gt;</button>
             </div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
@@ -93,7 +96,7 @@
                 <button id="outputTabBtn" class="pane-tab active">output.txt</button>
                 <button id="debugToggle" class="pane-tab" title="Show debugger diagnostics">Debugger</button>
               </div>
-              <button id="hideOutputBtn" class="small-button" title="Hide output panel">Hide</button>
+              <button id="hideOutputBtn" class="pane-collapse-button output-collapse-button" title="Hide output panel" aria-label="Hide output panel">&gt;</button>
             </div>
             <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
             <pre id="debug" class="debug-panel inline-debug" hidden aria-label="Debug output"></pre>
@@ -112,6 +115,7 @@
           <aside class="settings-nav">
             <button class="settings-tab active" data-settings-tab="profile">Profile</button>
             <button class="settings-tab" data-settings-tab="editor">Code Editor</button>
+            <button class="settings-tab" data-settings-tab="templates">Template Files</button>
           </aside>
           <div class="settings-panel">
             <div id="profileSettings" class="settings-content">
@@ -152,6 +156,16 @@
                   <option value="cpp" selected>C++17</option>
                 </select>
               </label>
+            </div>
+            <div id="templateSettings" class="settings-content" hidden>
+              <button id="openTemplateFileBtn" class="setting-action-button" type="button">
+                <span>Template.cpp</span>
+                <small>Edit default C++ code</small>
+              </button>
+              <button id="openHeadersFileBtn" class="setting-action-button" type="button">
+                <span>Headers.hpp</span>
+                <small>Edit submitted header block</small>
+              </button>
             </div>
           </div>
         </section>

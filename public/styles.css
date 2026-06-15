@@ -70,12 +70,17 @@ textarea {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 205px;
+  min-width: 164px;
 }
 
 .menu-button {
-  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 7px;
   font-size: 1rem;
+  line-height: 1;
 }
 
 .brand-mark {
@@ -139,11 +144,12 @@ h1 {
 }
 
 .contest-wrap {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 0 8px;
+  padding: 0 50px 0 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -244,24 +250,34 @@ button:disabled {
 }
 
 .import-button {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  right: 6px;
   display: inline-grid;
   place-items: center;
-  width: 38px;
-  min-height: 34px;
+  width: 34px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  transform: translateY(-50%);
   color: #061511;
-  border-color: var(--accent);
+  border-color: rgba(47, 198, 162, 0.72);
   background: linear-gradient(180deg, #42d8b7, #2fc6a2);
-  box-shadow: 0 8px 18px rgba(47, 198, 162, 0.22);
-  font-size: 1rem;
+  box-shadow: 0 4px 10px rgba(47, 198, 162, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  font-size: 0.9rem;
   font-weight: 900;
+}
+
+.import-button:hover {
+  border-color: #7ce7d0;
+  background: linear-gradient(180deg, #5fe5c8, #35cfaa);
 }
 
 .import-button::after {
   content: "";
   position: absolute;
-  bottom: 7px;
-  width: 13px;
+  bottom: 4px;
+  width: 12px;
   height: 2px;
   border-radius: 999px;
   background: currentColor;
@@ -301,8 +317,8 @@ button:disabled {
 
 .side-drawer {
   grid-area: drawer;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 46px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -312,8 +328,35 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
-.side-drawer[hidden] {
+.workspace.drawer-open .side-drawer {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.drawer-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace:not(.drawer-open) .drawer-panel {
   display: none;
+}
+
+.workspace.drawer-open .drawer-rail {
+  display: none;
+}
+
+.drawer-rail {
+  display: grid;
+  place-items: start center;
+  padding: 7px 9px 7px 5px;
+  border-right: 1px solid var(--line);
+  background: rgba(20, 23, 30, 0.78);
+}
+
+.workspace:not(.drawer-open) .drawer-rail {
+  border-right: 0;
 }
 
 .drawer-head {
@@ -446,30 +489,30 @@ button:disabled {
 .workspace {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) 8px minmax(280px, var(--side-width));
-  grid-template-areas: "editor main-resize side";
+  grid-template-columns: 46px minmax(320px, 1fr) 8px minmax(160px, var(--side-width));
+  grid-template-areas: "drawer editor main-resize side";
   gap: 0;
   min-height: 0;
 }
 
 .workspace.drawer-open {
-  grid-template-columns: var(--drawer-width) 8px minmax(320px, 1fr) 8px minmax(280px, var(--side-width));
+  grid-template-columns: var(--drawer-width) 8px minmax(320px, 1fr) 8px minmax(160px, var(--side-width));
   grid-template-areas: "drawer drawer-resize editor main-resize side";
 }
 
 .app-shell[data-code-side="right"] .workspace {
-  grid-template-columns: minmax(280px, var(--side-width)) 8px minmax(320px, 1fr);
-  grid-template-areas: "side main-resize editor";
+  grid-template-columns: minmax(160px, var(--side-width)) 8px 46px minmax(320px, 1fr);
+  grid-template-areas: "side main-resize drawer editor";
 }
 
 .app-shell[data-code-side="right"] .workspace.drawer-open {
-  grid-template-columns: var(--drawer-width) 8px minmax(280px, var(--side-width)) 8px minmax(320px, 1fr);
-  grid-template-areas: "drawer drawer-resize side main-resize editor";
+  grid-template-columns: minmax(160px, var(--side-width)) 8px var(--drawer-width) 8px minmax(320px, 1fr);
+  grid-template-areas: "side main-resize drawer drawer-resize editor";
 }
 
 .workspace.side-hidden {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "editor";
+  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-areas: "drawer editor";
 }
 
 .workspace.drawer-open.side-hidden {
@@ -478,8 +521,8 @@ button:disabled {
 }
 
 .app-shell[data-code-side="right"] .workspace.side-hidden {
-  grid-template-columns: 64px minmax(0, 1fr);
-  grid-template-areas: "reveal editor";
+  grid-template-columns: 46px 64px minmax(0, 1fr);
+  grid-template-areas: "drawer reveal editor";
   column-gap: 10px;
 }
 
@@ -489,8 +532,8 @@ button:disabled {
   column-gap: 0;
 }
 
-.workspace.side-hidden .editor-pane,
-.app-shell[data-code-side="right"] .workspace.side-hidden .editor-pane {
+.workspace.drawer-open.side-hidden .editor-pane,
+.app-shell[data-code-side="right"] .workspace.drawer-open.side-hidden .editor-pane {
   margin: 0;
 }
 
@@ -543,7 +586,7 @@ button:disabled {
   grid-area: editor;
   grid-template-rows: auto 1fr;
   margin-right: 7px;
-  margin-left: 0;
+  margin-left: 7px;
 }
 
 .app-shell[data-code-side="right"] .editor-pane {
@@ -552,7 +595,11 @@ button:disabled {
 }
 
 .workspace.drawer-open .editor-pane {
-  margin-left: 7px;
+  margin-left: 0;
+}
+
+.app-shell[data-code-side="right"] .workspace.drawer-open .editor-pane {
+  margin-left: 0;
 }
 
 .side-pane {
@@ -749,6 +796,42 @@ body.resizing .resize-handle::after {
 .pane-tab.active {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.pane-collapse-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1rem;
+  line-height: 1;
+  transform: rotate(var(--chevron-rotation));
+  transition: color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.pane-collapse-button:hover {
+  color: var(--accent);
+  background: rgba(47, 198, 162, 0.08);
+}
+
+.input-collapse-button {
+  --chevron-rotation: -90deg;
+}
+
+.input-collapse-button.is-collapsed {
+  --chevron-rotation: 90deg;
+}
+
+.output-collapse-button {
+  --chevron-rotation: 90deg;
+}
+
+.output-collapse-button.is-collapsed {
+  --chevron-rotation: -90deg;
 }
 
 .status {
@@ -1041,6 +1124,30 @@ textarea,
   background: var(--panel-2);
 }
 
+.setting-action-button {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+  border-radius: 8px;
+  background: #141720;
+}
+
+.setting-action-button span {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.setting-action-button small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.setting-action-button:hover {
+  background: rgba(47, 198, 162, 0.08);
+}
+
 .segmented-control {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1104,8 +1211,9 @@ textarea,
   .app-shell[data-code-side="left"] .workspace,
   .app-shell[data-code-side="right"] .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) 8px minmax(240px, 0.9fr);
+    grid-template-rows: 46px minmax(0, 1fr) 8px minmax(240px, 0.9fr);
     grid-template-areas:
+      "drawer"
       "editor"
       "main-resize"
       "side";
