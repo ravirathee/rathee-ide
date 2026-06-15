@@ -406,6 +406,11 @@ async function listSavedContests() {
         phase: metadata.phase || "",
         contestDir: path.relative(workspaceDir, contestPath),
         problemCount: metadata.problems?.length || 0,
+        problems: (metadata.problems || []).map((problem) => ({
+          contestId: problem.contestId,
+          index: problem.index,
+          name: problem.name
+        })),
         savedAt: metadata.savedAt || ""
       };
     }));

@@ -83,17 +83,26 @@ const els = {
   createFirstFileBtn: document.querySelector("#createFirstFileBtn"),
   input: document.querySelector("#input"),
   output: document.querySelector("#output"),
+  sidePane: document.querySelector("#sidePane"),
   debug: document.querySelector("#debug"),
-  debugDrawer: document.querySelector("#debugDrawer"),
   debugToggle: document.querySelector("#debugToggle"),
-  debugClose: document.querySelector("#debugClose"),
+  outputTabBtn: document.querySelector("#outputTabBtn"),
+  hideInputBtn: document.querySelector("#hideInputBtn"),
+  hideOutputBtn: document.querySelector("#hideOutputBtn"),
   fileTabs: document.querySelector("#fileTabs"),
   contestUrl: document.querySelector("#contestUrl"),
   importContestBtn: document.querySelector("#importContestBtn"),
   cfSubmitBtn: document.querySelector("#cfSubmitBtn"),
   cfStatusBtn: document.querySelector("#cfStatusBtn"),
-  fontDownBtn: document.querySelector("#fontDownBtn"),
-  fontUpBtn: document.querySelector("#fontUpBtn"),
+  settingsBtn: document.querySelector("#settingsBtn"),
+  settingsOverlay: document.querySelector("#settingsOverlay"),
+  settingsCloseBtn: document.querySelector("#settingsCloseBtn"),
+  settingsTabs: Array.from(document.querySelectorAll(".settings-tab")),
+  editorSettings: document.querySelector("#editorSettings"),
+  profileSettings: document.querySelector("#profileSettings"),
+  codeforcesHandleInput: document.querySelector("#codeforcesHandleInput"),
+  editorFontSizeInput: document.querySelector("#editorFontSizeInput"),
+  editorFontSelect: document.querySelector("#editorFontSelect"),
   fontSizeLabel: document.querySelector("#fontSizeLabel"),
   saveTemplateBtn: document.querySelector("#saveTemplateBtn"),
   resetCodeBtn: document.querySelector("#resetCodeBtn"),
@@ -101,7 +110,16 @@ const els = {
   meta: document.querySelector("#meta"),
   runBtn: document.querySelector("#runBtn"),
   debugBtn: document.querySelector("#debugBtn"),
-  layoutToggleBtn: document.querySelector("#layoutToggleBtn")
+  codeLeftBtn: document.querySelector("#codeLeftBtn"),
+  codeRightBtn: document.querySelector("#codeRightBtn"),
+  drawerResizeHandle: document.querySelector("#drawerResizeHandle"),
+  mainResizeHandle: document.querySelector("#mainResizeHandle"),
+  ioResizeHandle: document.querySelector("#ioResizeHandle"),
+  revealIoBtn: document.querySelector("#revealIoBtn"),
+  inputSection: document.querySelector(".input-section"),
+  outputSection: document.querySelector(".output-section"),
+  ioPane: document.querySelector(".io-pane"),
+  workspace: document.querySelector(".workspace")
 };
 
 let busy = false;
@@ -121,11 +139,23 @@ let cppHeaders = examples.headers;
 let templateDirty = false;
 let recentContest = JSON.parse(localStorage.getItem("rathee.recentContest") || "null");
 let savedContests = [];
-const codeforcesHandle = "mr_awesomeravi";
+let expandedContestKeys = new Set();
+let codeforcesHandle = localStorage.getItem("rathee.codeforcesHandle") || "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
+let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
+  || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
 let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
+let layoutState = {
+  showDrawer: false,
+  drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
+  codeSide: localStorage.getItem("rathee.codeSide") || "left",
+  showInput: localStorage.getItem("rathee.showInput") !== "false",
+  showOutput: localStorage.getItem("rathee.showOutput") !== "false",
+  sideWidth: Number(localStorage.getItem("rathee.sideWidth") || 38),
+  inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45)
+};
 
 boot();
 
@@ -139,7 +169,7 @@ function boot() {
   els.input.value = "";
   els.language.addEventListener("change", switchLanguage);
   els.runBtn.addEventListener("click", () => submit("run"));
-  els.debugBtn.addEventListener("click", () => submit("debug"));
+  els.debugBtn?.addEventListener("click", () => submit("debug"));
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
   els.codeFileBtn.addEventListener("click", openProblemCode);
@@ -148,17 +178,34 @@ function boot() {
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
   els.cfStatusBtn.addEventListener("click", () => refreshCodeforcesStatus(true));
-  els.fontDownBtn.addEventListener("click", () => adjustEditorFontSize(-1));
-  els.fontUpBtn.addEventListener("click", () => adjustEditorFontSize(1));
+  els.settingsBtn.addEventListener("click", () => showSettings(true));
+  els.settingsCloseBtn.addEventListener("click", () => showSettings(false));
+  els.settingsOverlay.addEventListener("click", (event) => {
+    if (event.target === els.settingsOverlay) showSettings(false);
+  });
+  els.settingsTabs.forEach((tab) => {
+    tab.addEventListener("click", () => switchSettingsTab(tab.dataset.settingsTab));
+  });
+  els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
+  els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
+  els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
   els.contestUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") importContest();
   });
-  els.layoutToggleBtn.addEventListener("click", toggleLayout);
-  els.debugToggle.addEventListener("click", () => showDebug(true));
-  els.debugClose.addEventListener("click", () => showDebug(false));
+  els.codeLeftBtn.addEventListener("click", () => setCodeEditorPlacement("left"));
+  els.codeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
+  els.hideInputBtn.addEventListener("click", () => togglePanel("input"));
+  els.hideOutputBtn.addEventListener("click", () => togglePanel("output"));
+  els.revealIoBtn.addEventListener("click", revealInputOutput);
+  els.outputTabBtn.addEventListener("click", () => setOutputView("output"));
+  els.debugToggle.addEventListener("click", () => setOutputView("debug"));
+  initResizablePanes();
+  applyWorkspaceLayout();
   setEditorFontSize(editorFontSize);
+  setEditorFontFamily(editorFontFamily);
+  setCodeforcesHandle(codeforcesHandle);
   codeEditor?.on("change", handleEditorChange);
   updateEditorActionButton();
   updateEditorEmptyState();
@@ -369,6 +416,142 @@ function setEditorLanguage(language) {
   requestAnimationFrame(() => codeEditor.refresh());
 }
 
+function applyWorkspaceLayout() {
+  layoutState.drawerWidth = clamp(layoutState.drawerWidth, 220, 420);
+  layoutState.sideWidth = clamp(layoutState.sideWidth, 24, 68);
+  layoutState.inputHeight = clamp(layoutState.inputHeight, 18, 78);
+
+  els.app.dataset.codeSide = layoutState.codeSide;
+  els.app.style.setProperty("--drawer-width", `${layoutState.drawerWidth}px`);
+  els.app.style.setProperty("--side-width", `${layoutState.sideWidth}%`);
+  els.app.style.setProperty("--input-height", `${layoutState.inputHeight}%`);
+  els.workspace.classList.toggle("drawer-open", layoutState.showDrawer);
+  els.sideDrawer.hidden = !layoutState.showDrawer;
+  els.drawerResizeHandle.hidden = !layoutState.showDrawer;
+  const bothHidden = !layoutState.showInput && !layoutState.showOutput;
+  els.workspace.classList.toggle("side-hidden", bothHidden);
+  els.sidePane.hidden = bothHidden;
+  els.mainResizeHandle.hidden = bothHidden;
+  els.revealIoBtn.hidden = !bothHidden;
+  els.revealIoBtn.textContent = layoutState.codeSide === "right" ? "I/O ▶" : "◀ I/O";
+  els.inputSection.classList.toggle("collapsed", !layoutState.showInput);
+  els.outputSection.classList.toggle("collapsed", !layoutState.showOutput);
+  els.ioResizeHandle.hidden = !(layoutState.showInput && layoutState.showOutput);
+  els.ioPane.style.gridTemplateRows = buildIoRows();
+
+  els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
+  els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
+  els.hideInputBtn.textContent = layoutState.showInput ? "Hide" : "Show";
+  els.hideOutputBtn.textContent = layoutState.showOutput ? "Hide" : "Show";
+  localStorage.setItem("rathee.codeSide", layoutState.codeSide);
+  localStorage.setItem("rathee.drawerWidth", String(layoutState.drawerWidth));
+  localStorage.setItem("rathee.showInput", String(layoutState.showInput));
+  localStorage.setItem("rathee.showOutput", String(layoutState.showOutput));
+  localStorage.setItem("rathee.sideWidth", String(layoutState.sideWidth));
+  localStorage.setItem("rathee.inputHeight", String(layoutState.inputHeight));
+
+  requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function buildIoRows() {
+  if (layoutState.showInput && layoutState.showOutput) {
+    return `minmax(120px, ${layoutState.inputHeight}%) 8px minmax(120px, 1fr)`;
+  }
+  if (layoutState.showInput) return "minmax(0, 1fr) 0 42px";
+  if (layoutState.showOutput) return "42px 0 minmax(0, 1fr)";
+  return "42px 0 42px";
+}
+
+function togglePanel(panel) {
+  if (panel === "input") layoutState.showInput = !layoutState.showInput;
+  if (panel === "output") layoutState.showOutput = !layoutState.showOutput;
+  applyWorkspaceLayout();
+}
+
+function revealInputOutput() {
+  layoutState.showInput = true;
+  layoutState.showOutput = true;
+  applyWorkspaceLayout();
+}
+
+function setOutputView(view) {
+  const showDebugPanel = view === "debug";
+  els.output.hidden = showDebugPanel;
+  els.debug.hidden = !showDebugPanel;
+  els.outputTabBtn.classList.toggle("active", !showDebugPanel);
+  els.debugToggle.classList.toggle("active", showDebugPanel);
+  if (!layoutState.showOutput) {
+    layoutState.showOutput = true;
+    applyWorkspaceLayout();
+  }
+}
+
+function showSettings(visible) {
+  els.settingsOverlay.hidden = !visible;
+  els.app.classList.toggle("settings-open", visible);
+}
+
+function switchSettingsTab(tabName) {
+  const target = ["profile", "editor"].includes(tabName) ? tabName : "profile";
+  els.settingsTabs.forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.settingsTab === target);
+  });
+  els.editorSettings.hidden = target !== "editor";
+  els.profileSettings.hidden = target !== "profile";
+}
+
+function setCodeEditorPlacement(side) {
+  layoutState.codeSide = side === "right" ? "right" : "left";
+  applyWorkspaceLayout();
+}
+
+function initResizablePanes() {
+  els.mainResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "main"));
+  els.drawerResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "drawer"));
+  els.ioResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "io"));
+}
+
+function startResize(event, target) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startDrawerWidth = layoutState.drawerWidth;
+  const startSideWidth = layoutState.sideWidth;
+  const startInputHeight = layoutState.inputHeight;
+  const workspaceRect = els.workspace.getBoundingClientRect();
+  const ioRect = els.ioPane.getBoundingClientRect();
+  document.body.classList.add("resizing");
+
+  const onMove = (moveEvent) => {
+    if (target === "main") {
+      const delta = layoutState.codeSide === "left"
+        ? startX - moveEvent.clientX
+        : moveEvent.clientX - startX;
+      layoutState.sideWidth = clamp(startSideWidth + (delta / workspaceRect.width) * 100, 24, 68);
+    }
+    if (target === "drawer") {
+      layoutState.drawerWidth = clamp(startDrawerWidth + (moveEvent.clientX - startX), 220, 420);
+    }
+    if (target === "io") {
+      layoutState.inputHeight = clamp(startInputHeight + ((moveEvent.clientY - startY) / ioRect.height) * 100, 18, 78);
+    }
+    applyWorkspaceLayout();
+  };
+
+  const onUp = () => {
+    document.body.classList.remove("resizing");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
 function switchLanguage() {
   saveCurrentState();
   const language = els.language.value;
@@ -389,13 +572,13 @@ function openProblemCode() {
 }
 
 function toggleDrawer() {
-  const nextVisible = els.sideDrawer.hidden;
-  showDrawer(nextVisible);
-  if (nextVisible) loadSavedContestList();
+  showDrawer(!layoutState.showDrawer);
+  if (layoutState.showDrawer) loadSavedContestList();
 }
 
 function showDrawer(visible) {
-  els.sideDrawer.hidden = !visible;
+  layoutState.showDrawer = visible;
+  applyWorkspaceLayout();
 }
 
 async function loadSavedContestList() {
@@ -418,14 +601,60 @@ function renderSavedContests() {
   }
   els.savedContestSection.hidden = false;
   for (const contest of savedContests) {
+    const contestKey = contestKeyFor(contest);
+    const expanded = expandedContestKeys.has(contestKey);
+    const group = document.createElement("div");
+    group.className = "saved-contest-group";
+
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "drawer-item saved-contest-btn";
-    button.textContent = formatRecentContestName(contest);
+    button.className = "drawer-item saved-contest-btn contest-toggle-btn";
     button.title = `${contest.name}${contest.problemCount ? ` · ${contest.problemCount} problems` : ""}`;
-    button.addEventListener("click", () => loadSavedContest(contest));
-    els.savedContestList.append(button);
+    button.setAttribute("aria-expanded", String(expanded));
+
+    const chevron = document.createElement("span");
+    chevron.className = "contest-chevron";
+    chevron.textContent = ">";
+
+    const label = document.createElement("span");
+    label.className = "contest-title";
+    label.textContent = formatRecentContestName(contest);
+
+    button.append(chevron, label);
+    button.addEventListener("click", () => toggleContestProblems(contest));
+    group.append(button);
+
+    if (expanded) {
+      const list = document.createElement("div");
+      list.className = "contest-problem-list";
+      for (const problem of contest.problems || []) {
+        const problemButton = document.createElement("button");
+        problemButton.type = "button";
+        problemButton.className = "contest-problem-btn";
+        problemButton.textContent = `${problem.index}. ${problem.name || "Problem"}`;
+        problemButton.title = problemButton.textContent;
+        problemButton.addEventListener("click", () => loadSavedContest(contest, problem.index));
+        list.append(problemButton);
+      }
+      group.append(list);
+    }
+
+    els.savedContestList.append(group);
   }
+}
+
+function contestKeyFor(contest) {
+  return contest.contestDir || contest.contestId || contest.name || "";
+}
+
+function toggleContestProblems(contest) {
+  const contestKey = contestKeyFor(contest);
+  if (expandedContestKeys.has(contestKey)) {
+    expandedContestKeys.delete(contestKey);
+  } else {
+    expandedContestKeys.add(contestKey);
+  }
+  renderSavedContests();
 }
 
 function formatRecentContestName(contest) {
@@ -444,12 +673,11 @@ function shortenContestName(name) {
     .trim();
 }
 
-async function loadSavedContest(contest) {
+async function loadSavedContest(contest, targetProblemIndex = "") {
   if (!contest?.contestDir && !contest?.contestId) return;
   if (contest.contestId) {
     els.contestUrl.value = `https://codeforces.com/contest/${contest.contestId}`;
   }
-  showDrawer(false);
   saveCurrentState();
   setImportBusy(true);
   setStatus("Loading", "idle");
@@ -472,6 +700,12 @@ async function loadSavedContest(contest) {
     };
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
     applyContestProblems(result, { source: "saved" });
+    if (targetProblemIndex) {
+      const targetFilename = `${targetProblemIndex}.cpp`;
+      if (cppFileNames.includes(targetFilename) && activeCppFile !== targetFilename) {
+        switchCppFile(targetFilename);
+      }
+    }
   } catch (error) {
     els.debug.textContent = error.message;
     setStatus("Load failed", "error");
@@ -494,7 +728,6 @@ function switchEditorView(view) {
   renderFileTabs();
   updateEditorEmptyState();
   updateEditorActionButton();
-  showDrawer(false);
   setStatus(view === "headers" ? "Headers.hpp" : view === "template" ? "Template.cpp" : "Code", "idle");
 }
 
@@ -781,13 +1014,6 @@ function applyContestProblems(contest, options = {}) {
   refreshCodeforcesStatus(false);
 }
 
-function setLayout(layout) {
-  els.app.dataset.layout = layout;
-  els.layoutToggleBtn.textContent = layout === "vertical" ? "Split ↔" : "Split ↕";
-  els.layoutToggleBtn.title = layout === "vertical" ? "Switch to horizontal split" : "Switch to vertical split";
-  requestAnimationFrame(() => codeEditor?.refresh());
-}
-
 async function resetActiveCode() {
   if (els.language.value !== "cpp" || editorView !== "code" || !activeCppFile) {
     setStatus("Code only", "error");
@@ -832,20 +1058,48 @@ function updateEditorActionButton() {
   }
 }
 
-function toggleLayout() {
-  setLayout(els.app.dataset.layout === "vertical" ? "horizontal" : "vertical");
-}
-
-function adjustEditorFontSize(delta) {
-  setEditorFontSize(editorFontSize + delta);
-}
-
 function setEditorFontSize(size) {
   editorFontSize = Math.min(24, Math.max(11, size));
   document.documentElement.style.setProperty("--editor-font-size", `${editorFontSize}px`);
   els.fontSizeLabel.textContent = `${editorFontSize}px`;
+  els.editorFontSizeInput.value = String(editorFontSize);
   localStorage.setItem("forge.editorFontSize", String(editorFontSize));
   requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function setEditorFontFamily(fontFamily) {
+  editorFontFamily = fontFamily || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
+  document.documentElement.style.setProperty("--editor-font-family", editorFontFamily);
+  els.editorFontSelect.value = editorFontFamily;
+  localStorage.setItem("rathee.editorFontFamily", editorFontFamily);
+  requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function setCodeforcesHandle(handle) {
+  codeforcesHandle = normalizeCodeforcesHandle(handle);
+  els.codeforcesHandleInput.value = codeforcesHandle;
+  localStorage.setItem("rathee.codeforcesHandle", codeforcesHandle);
+}
+
+function normalizeCodeforcesHandle(value) {
+  const raw = String(value || "").trim();
+  try {
+    const url = new URL(raw);
+    if (/(^|\.)codeforces\.com$/i.test(url.hostname)) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const profileIndex = parts.findIndex((part) => part.toLowerCase() === "profile");
+      if (profileIndex !== -1 && parts[profileIndex + 1]) {
+        return decodeURIComponent(parts[profileIndex + 1]).trim();
+      }
+    }
+  } catch {
+    // Treat plain text as a handle.
+  }
+  return raw;
+}
+
+function validCodeforcesHandle() {
+  return /^[A-Za-z0-9_.-]{3,24}$/.test(codeforcesHandle);
 }
 
 async function submitToCodeforces() {
@@ -922,6 +1176,16 @@ function stripDuplicateHeaders(source) {
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
+  if (!validCodeforcesHandle()) {
+    if (showWhenEmpty) {
+      setStatus("No handle", "error");
+      els.meta.textContent = "Set a valid Codeforces handle in Settings > Profile";
+      els.debug.textContent = "Codeforces handle must be 3-24 characters and may use letters, numbers, underscore, dot, or dash.";
+      showDebug(true);
+    }
+    return;
+  }
+
   const problem = cppProblems[activeCppFile];
   if (!problem?.contestId || !problem?.index) {
     if (showWhenEmpty) {
@@ -1020,7 +1284,7 @@ async function submit(mode) {
 
 function setButtons(enabled) {
   els.runBtn.disabled = !enabled;
-  els.debugBtn.disabled = !enabled;
+  if (els.debugBtn) els.debugBtn.disabled = !enabled;
   els.cfSubmitBtn.disabled = !enabled;
   els.cfStatusBtn.disabled = !enabled;
 }
@@ -1036,7 +1300,11 @@ function setStatus(text, tone) {
 }
 
 function showDebug(visible) {
-  els.debugDrawer.hidden = !visible;
+  if (visible) {
+    setOutputView("debug");
+  } else {
+    setOutputView("output");
+  }
 }
 
 function labelForStatus(status) {

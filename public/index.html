@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="app-shell" data-layout="vertical">
+    <main class="app-shell" data-code-side="left">
       <header class="topbar">
         <div class="brand">
           <button id="menuBtn" class="icon-button menu-button" title="Open files">☰</button>
@@ -20,45 +20,46 @@
           </div>
         </div>
         <div class="toolbar">
-          <label class="contest-wrap" title="Codeforces contest URL">
-            <span>Codeforces</span>
-            <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
-          </label>
-          <button id="importContestBtn">Import</button>
-          <button id="cfSubmitBtn">Submit</button>
-          <button id="cfStatusBtn">Status</button>
-          <div class="font-controls" title="Editor font size">
-            <button id="fontDownBtn" class="icon-button" aria-label="Decrease font size">A-</button>
-            <span id="fontSizeLabel">15px</span>
-            <button id="fontUpBtn" class="icon-button" aria-label="Increase font size">A+</button>
+          <div class="center-actions">
+            <button id="runBtn" class="play-button" title="Run">▶</button>
+            <button id="cfSubmitBtn" class="submit-button">
+              <span class="submit-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M16.6 18.5h1.2a3.7 3.7 0 0 0 .7-7.33 6.5 6.5 0 0 0-12.38-1.56A4.56 4.56 0 0 0 6.55 18.5h.85" />
+                  <path d="M12 18V9.75" />
+                  <path d="m8.75 13 3.25-3.25L15.25 13" />
+                </svg>
+              </span>
+              <span>Submit</span>
+            </button>
+            <button id="settingsBtn" class="icon-button settings-button" title="Settings">⚙</button>
           </div>
-          <button id="runBtn" class="primary">Run</button>
-          <button id="debugBtn">Debug</button>
-          <button id="layoutToggleBtn" class="layout-toggle" title="Toggle split layout">Split ↔</button>
-          <label class="select-wrap" title="Language">
-            <span>Language</span>
-            <select id="language">
-              <option value="python">Python 3</option>
-              <option value="cpp" selected>C++17</option>
-            </select>
-          </label>
+          <div class="right-actions">
+            <label class="contest-wrap" title="Codeforces contest URL">
+              <span>Codeforces</span>
+              <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
+            </label>
+            <button id="cfStatusBtn">Status</button>
+            <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
+          </div>
         </div>
       </header>
 
-      <aside id="sideDrawer" class="side-drawer" hidden>
-        <div class="drawer-head">
-          <span>Files</span>
-          <button id="drawerCloseBtn" class="small-button">Close</button>
-        </div>
-        <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
-        <button id="templateBundleBtn" class="drawer-item">Template + Headers</button>
-        <div id="savedContestSection" class="saved-contests" hidden>
-          <div class="drawer-label">Saved Contests</div>
-          <div id="savedContestList" class="saved-contest-list"></div>
-        </div>
-      </aside>
-
       <section class="workspace">
+        <aside id="sideDrawer" class="side-drawer" hidden>
+          <div class="drawer-head">
+            <span>Files</span>
+            <button id="drawerCloseBtn" class="drawer-close-button" title="Close drawer" aria-label="Close drawer">&lt;</button>
+          </div>
+          <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
+          <button id="templateBundleBtn" class="drawer-item">Template + Headers</button>
+          <div id="savedContestSection" class="saved-contests" hidden>
+            <div class="drawer-label">Saved Contests</div>
+            <div id="savedContestList" class="saved-contest-list"></div>
+          </div>
+        </aside>
+        <div id="drawerResizeHandle" class="resize-handle vertical-handle drawer-resize-handle" hidden title="Resize files pane"></div>
+
         <section class="editor-pane">
           <div class="editor-top">
             <div id="fileTabs" class="file-tabs" aria-label="C++ files"></div>
@@ -74,29 +75,87 @@
           </div>
         </section>
 
-        <section class="io-pane">
+        <div id="mainResizeHandle" class="resize-handle vertical-handle" title="Resize panes"></div>
+
+        <section id="sidePane" class="side-pane">
+          <section class="io-pane">
           <div class="io-section input-section">
             <div class="pane-head">
               <span>input.txt</span>
+              <button id="hideInputBtn" class="small-button" title="Hide input panel">Hide</button>
             </div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
+          <div id="ioResizeHandle" class="resize-handle horizontal-handle" title="Resize input and output"></div>
           <div class="io-section output-section">
             <div class="pane-head">
-              <span>output.txt</span>
-              <button id="debugToggle" class="small-button" title="Show debugger diagnostics">Debugger</button>
+              <div class="pane-tabs">
+                <button id="outputTabBtn" class="pane-tab active">output.txt</button>
+                <button id="debugToggle" class="pane-tab" title="Show debugger diagnostics">Debugger</button>
+              </div>
+              <button id="hideOutputBtn" class="small-button" title="Hide output panel">Hide</button>
             </div>
             <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
+            <pre id="debug" class="debug-panel inline-debug" hidden aria-label="Debug output"></pre>
           </div>
-          <div id="debugDrawer" class="debug-drawer" hidden>
-            <div class="pane-head">
-              <span>Debugger</span>
-              <button id="debugClose" class="small-button" title="Close debugger">Close</button>
+          </section>
+        </section>
+        <button id="revealIoBtn" class="reveal-io-button" title="Show input and output" hidden>◀ I/O</button>
+      </section>
+
+      <div id="settingsOverlay" class="settings-overlay" hidden>
+        <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <div class="settings-head">
+            <h2 id="settingsTitle">Settings</h2>
+            <button id="settingsCloseBtn" class="small-button">Close</button>
+          </div>
+          <aside class="settings-nav">
+            <button class="settings-tab active" data-settings-tab="profile">Profile</button>
+            <button class="settings-tab" data-settings-tab="editor">Code Editor</button>
+          </aside>
+          <div class="settings-panel">
+            <div id="profileSettings" class="settings-content">
+              <label class="setting-row">
+                <span>Codeforces handle or profile URL</span>
+                <input id="codeforcesHandleInput" type="text" placeholder="tourist or https://codeforces.com/profile/tourist" autocomplete="off" />
+              </label>
             </div>
-            <pre id="debug" class="debug-panel" aria-label="Debug output"></pre>
+            <div id="editorSettings" class="settings-content" hidden>
+              <label class="setting-row">
+                <span>Font size</span>
+                <div class="setting-inline">
+                  <input id="editorFontSizeInput" type="range" min="11" max="24" step="1" />
+                  <span id="fontSizeLabel">15px</span>
+                </div>
+              </label>
+              <label class="setting-row">
+                <span>Editor font</span>
+                <select id="editorFontSelect">
+                  <option value="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace">System Mono</option>
+                  <option value="Menlo, Monaco, Consolas, Liberation Mono, monospace">Menlo</option>
+                  <option value="Consolas, Liberation Mono, Menlo, monospace">Consolas</option>
+                  <option value="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace">JetBrains Mono</option>
+                  <option value="Fira Code, ui-monospace, SFMono-Regular, Menlo, monospace">Fira Code</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span>Code Editor Placement</span>
+                <div class="segmented-control" role="group" aria-label="Code editor placement">
+                  <button id="codeLeftBtn" type="button" class="segment active">Left</button>
+                  <button id="codeRightBtn" type="button" class="segment">Right</button>
+                </div>
+              </label>
+              <label class="setting-row">
+                <span>Language</span>
+                <select id="language">
+                  <option value="python">Python 3</option>
+                  <option value="cpp" selected>C++17</option>
+                </select>
+              </label>
+            </div>
           </div>
         </section>
-      </section>
+      </div>
 
       <footer class="statusbar">
         <span id="meta">Ready</span>
