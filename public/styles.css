@@ -501,13 +501,13 @@ button:disabled {
 }
 
 .app-shell[data-code-side="right"] .workspace {
-  grid-template-columns: minmax(160px, var(--side-width)) 8px 46px minmax(320px, 1fr);
-  grid-template-areas: "side main-resize drawer editor";
+  grid-template-columns: 46px minmax(160px, var(--side-width)) 8px minmax(320px, 1fr);
+  grid-template-areas: "drawer side main-resize editor";
 }
 
 .app-shell[data-code-side="right"] .workspace.drawer-open {
-  grid-template-columns: minmax(160px, var(--side-width)) 8px var(--drawer-width) 8px minmax(320px, 1fr);
-  grid-template-areas: "side main-resize drawer drawer-resize editor";
+  grid-template-columns: var(--drawer-width) 8px minmax(160px, var(--side-width)) 8px minmax(320px, 1fr);
+  grid-template-areas: "drawer drawer-resize side main-resize editor";
 }
 
 .workspace.side-hidden {
@@ -584,7 +584,7 @@ button:disabled {
 .editor-pane {
   position: relative;
   grid-area: editor;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   margin-right: 7px;
   margin-left: 7px;
 }
@@ -594,12 +594,12 @@ button:disabled {
   margin-left: 7px;
 }
 
-.workspace.drawer-open .editor-pane {
+.app-shell[data-code-side="left"] .workspace.drawer-open .editor-pane {
   margin-left: 0;
 }
 
 .app-shell[data-code-side="right"] .workspace.drawer-open .editor-pane {
-  margin-left: 0;
+  margin-left: 7px;
 }
 
 .side-pane {
@@ -700,6 +700,102 @@ body.resizing .resize-handle::after {
   flex: 0 0 auto;
 }
 
+.editor-quick-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.editor-quick-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  transform: rotate(90deg);
+}
+
+.editor-quick-toggle:hover {
+  color: var(--accent);
+  background: rgba(47, 198, 162, 0.08);
+}
+
+.editor-quick-settings {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 0.8fr) minmax(180px, 0.8fr) minmax(140px, 0.7fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(20, 23, 30, 0.88);
+}
+
+.editor-quick-settings[hidden] {
+  display: none;
+}
+
+.quick-setting {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #141720;
+}
+
+.quick-setting span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.quick-setting strong {
+  color: var(--text);
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.quick-setting input,
+.quick-setting select {
+  min-height: 28px;
+  font-size: 0.76rem;
+}
+
+.quick-setting:first-child {
+  grid-template-columns: auto minmax(70px, 1fr) 38px;
+}
+
+.quick-segment-setting {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.quick-segments {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.quick-segments button {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.76rem;
+}
+
+.quick-segments button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(47, 198, 162, 0.1);
+}
+
 .file-tabs {
   display: flex;
   align-items: center;
@@ -707,24 +803,6 @@ body.resizing .resize-handle::after {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
-}
-
-.file-tabs.python-mode::before {
-  content: "main.py";
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  min-height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  color: var(--accent);
-  background: var(--panel-2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.file-tabs.python-mode .file-tab {
-  display: none;
 }
 
 .file-tab {
@@ -1250,6 +1328,10 @@ textarea,
   .app-shell[data-code-side="right"] .editor-pane,
   .app-shell[data-code-side="right"] .side-pane {
     margin: 0;
+  }
+
+  .editor-quick-settings {
+    grid-template-columns: 1fr;
   }
 
   .settings-modal {

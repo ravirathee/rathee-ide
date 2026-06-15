@@ -5,8 +5,11 @@ workspace/main.out
 workspace/main.out.dSYM/
 workspace/[A-Z]*.cpp
 !workspace/Template.cpp
+!workspace/Template.py
 workspace/TemporaryCPPFiles/*
 !workspace/TemporaryCPPFiles/.gitkeep
+workspace/TemporaryPythonFiles/*
+!workspace/TemporaryPythonFiles/.gitkeep
 workspace/contests/*
 !workspace/contests/.gitkeep
 workspace/input.txt

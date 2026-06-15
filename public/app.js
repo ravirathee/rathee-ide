@@ -32,12 +32,21 @@ const els = {
   templateSettings: document.querySelector("#templateSettings"),
   openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
   openHeadersFileBtn: document.querySelector("#openHeadersFileBtn"),
+  openPythonTemplateFileBtn: document.querySelector("#openPythonTemplateFileBtn"),
   codeforcesHandleInput: document.querySelector("#codeforcesHandleInput"),
   editorFontSizeInput: document.querySelector("#editorFontSizeInput"),
   editorFontSelect: document.querySelector("#editorFontSelect"),
   fontSizeLabel: document.querySelector("#fontSizeLabel"),
   saveTemplateBtn: document.querySelector("#saveTemplateBtn"),
   resetCodeBtn: document.querySelector("#resetCodeBtn"),
+  editorQuickSettingsBtn: document.querySelector("#editorQuickSettingsBtn"),
+  editorQuickSettings: document.querySelector("#editorQuickSettings"),
+  quickEditorFontSizeInput: document.querySelector("#quickEditorFontSizeInput"),
+  quickFontSizeLabel: document.querySelector("#quickFontSizeLabel"),
+  quickEditorFontSelect: document.querySelector("#quickEditorFontSelect"),
+  quickCodeLeftBtn: document.querySelector("#quickCodeLeftBtn"),
+  quickCodeRightBtn: document.querySelector("#quickCodeRightBtn"),
+  quickLanguage: document.querySelector("#quickLanguage"),
   status: document.querySelector("#statusPill"),
   meta: document.querySelector("#meta"),
   runBtn: document.querySelector("#runBtn"),
@@ -61,10 +70,15 @@ let cppInputs = {};
 let cppTabLabels = {};
 let cppProblems = {};
 let activeCppFile = "A.cpp";
+let pyFileNames = [];
+let pyFiles = {};
+let pyInputs = {};
+let pyTabLabels = {};
+let pyProblems = {};
+let activePyFile = "A.py";
 let codeFileScope = "workspace";
 let activeContestDir = "";
 let pythonCode = "";
-let pythonInput = "";
 let editorView = "code";
 let cppTemplate = "";
 let cppHeaders = "";
@@ -79,6 +93,8 @@ let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
 let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
+let currentLanguage = document.querySelector("#language").value;
+let editorQuickSettingsOpen = false;
 let layoutState = {
   showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
@@ -97,6 +113,9 @@ function boot() {
   activeCppFile = "";
   cppFileNames = [];
   cppFiles = {};
+  activePyFile = "";
+  pyFileNames = [];
+  pyFiles = {};
   setEditorCode("");
   els.input.value = "";
   els.language.addEventListener("change", switchLanguage);
@@ -107,6 +126,7 @@ function boot() {
   els.codeFileBtn.addEventListener("click", openProblemCode);
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
+  els.openPythonTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("python-template"));
   els.createFirstFileBtn.addEventListener("click", createFirstCppFile);
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
@@ -124,6 +144,15 @@ function boot() {
   els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
+  els.editorQuickSettingsBtn.addEventListener("click", toggleEditorQuickSettings);
+  els.quickEditorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.quickEditorFontSizeInput.value)));
+  els.quickEditorFontSelect.addEventListener("change", () => setEditorFontFamily(els.quickEditorFontSelect.value));
+  els.quickCodeLeftBtn.addEventListener("click", () => setCodeEditorPlacement("left"));
+  els.quickCodeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
+  els.quickLanguage.addEventListener("change", () => {
+    els.language.value = els.quickLanguage.value;
+    switchLanguage();
+  });
   els.contestUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") importContest();
   });
@@ -138,13 +167,14 @@ function boot() {
   applyWorkspaceLayout();
   setEditorFontSize(editorFontSize);
   setEditorFontFamily(editorFontFamily);
+  els.quickLanguage.value = els.language.value;
   setCodeforcesHandle(codeforcesHandle);
   codeEditor?.on("change", handleEditorChange);
   updateEditorActionButton();
   updateEditorEmptyState();
   loadSavedContestList();
   loadWorkspaceFiles();
-  loadTemplateFiles().then(loadWorkspaceCppFiles);
+  loadTemplateFiles().then(() => Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]));
 }
 
 async function loadWorkspaceFiles() {
@@ -190,8 +220,49 @@ async function loadWorkspaceCppFiles() {
   }
 }
 
+async function loadWorkspacePythonFiles() {
+  try {
+    const res = await fetch(`/api/workspace-python-files?ts=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load workspace Python files.");
+
+    if (data.files?.length) {
+      if (els.language.value === "python") {
+        codeFileScope = "workspace";
+        activeContestDir = "";
+      }
+      pyFileNames = data.files.map((file) => file.filename);
+      pyFiles = Object.fromEntries(data.files.map((file) => [file.filename, file.code]));
+    } else {
+      pyFileNames = [];
+      pyFiles = {};
+    }
+
+    pyInputs = Object.fromEntries(pyFileNames.map((name) => [name, ""]));
+    pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
+    pyProblems = Object.fromEntries(pyFileNames.map((name) => [name, null]));
+    activePyFile = pyFileNames.includes(activePyFile) ? activePyFile : pyFileNames[0] || "";
+
+    if (editorView === "code" && els.language.value === "python") {
+      renderFileTabs();
+      setEditorCode(activePyFile ? pyFiles[activePyFile] : "");
+      updateEditorEmptyState();
+    }
+  } catch (error) {
+    els.meta.textContent = error.message || "Could not load workspace Python files";
+  }
+}
+
 async function saveWorkspaceCppFile(filename, code) {
   await fetch("/api/workspace-cpp-files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, code })
+  });
+}
+
+async function saveWorkspacePythonFile(filename, code) {
+  await fetch("/api/workspace-python-files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, code })
@@ -207,13 +278,26 @@ async function saveContestCppFile(filename, code) {
   });
 }
 
+async function saveContestPythonFile(filename, code) {
+  if (!activeContestDir) return;
+  await fetch("/api/codeforces/contest-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contestDir: activeContestDir, filename, code })
+  });
+}
+
 function scheduleWorkspaceCodeSave() {
-  if (editorView !== "code" || els.language.value !== "cpp" || !activeCppFile) return;
+  if (editorView !== "code") return;
+  const isPython = els.language.value === "python";
+  const filename = isPython ? activePyFile : activeCppFile;
+  if (!filename) return;
   clearTimeout(codeSaveTimer);
-  const filename = activeCppFile;
-  const code = cppFiles[filename];
+  const code = isPython ? pyFiles[filename] : cppFiles[filename];
   codeSaveTimer = setTimeout(() => {
-    const save = codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
+    const save = isPython
+      ? codeFileScope === "contest" ? saveContestPythonFile : saveWorkspacePythonFile
+      : codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
     save(filename, code).catch(() => {
       els.meta.textContent = `Could not save ${filename}`;
     });
@@ -222,6 +306,12 @@ function scheduleWorkspaceCodeSave() {
 
 async function deleteWorkspaceCppFile(filename) {
   await fetch(`/api/workspace-cpp-files?filename=${encodeURIComponent(filename)}`, {
+    method: "DELETE"
+  });
+}
+
+async function deleteWorkspacePythonFile(filename) {
+  await fetch(`/api/workspace-python-files?filename=${encodeURIComponent(filename)}`, {
     method: "DELETE"
   });
 }
@@ -245,6 +335,7 @@ async function reloadTemplateFilesFromWorkspace({ updateVisible, resetDirty }) {
     if (typeof files.python === "string") pythonCode = files.python;
     if (updateVisible && editorView === "template") setEditorCode(cppTemplate);
     if (updateVisible && editorView === "headers") setEditorCode(cppHeaders);
+    if (updateVisible && editorView === "python-template") setEditorCode(pythonCode);
     if (resetDirty) setTemplateDirty(false);
     return true;
   } catch (error) {
@@ -268,7 +359,7 @@ async function saveTemplateFilesFromEditor() {
     await saveTemplateFilesNow();
     setTemplateDirty(false);
     setStatus("Saved", "success");
-    els.meta.textContent = "Template.cpp and Headers.hpp saved to workspace";
+    els.meta.textContent = "Template files saved to workspace";
   } catch {
     setStatus("Save failed", "error");
     els.meta.textContent = "Could not save template files";
@@ -282,11 +373,16 @@ function setTemplateDirty(dirty) {
 
 function handleEditorChange() {
   if (settingEditorValue) return;
-  if (editorView === "template" || editorView === "headers") {
+  if (isTemplateEditorView()) {
     saveCurrentState({ markDirty: true });
-  } else if (editorView === "code" && els.language.value === "cpp" && activeCppFile) {
-    cppFiles[activeCppFile] = getEditorCode();
-    scheduleWorkspaceCodeSave();
+  } else if (editorView === "code") {
+    if (els.language.value === "python" && activePyFile) {
+      pyFiles[activePyFile] = getEditorCode();
+      scheduleWorkspaceCodeSave();
+    } else if (els.language.value === "cpp" && activeCppFile) {
+      cppFiles[activeCppFile] = getEditorCode();
+      scheduleWorkspaceCodeSave();
+    }
   }
 }
 
@@ -336,8 +432,10 @@ function setEditorCode(value) {
 }
 
 function updateEditorEmptyState() {
-  const empty = editorView === "code" && els.language.value === "cpp" && !activeCppFile;
+  const language = els.language.value;
+  const empty = editorView === "code" && !currentActiveFile();
   els.emptyEditorState.hidden = !empty;
+  els.createFirstFileBtn.textContent = `Create ${language === "python" ? "A.py" : "A.cpp"}`;
   codeEditor?.setOption("readOnly", empty ? "nocursor" : false);
 }
 
@@ -374,6 +472,8 @@ function applyWorkspaceLayout() {
 
   els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
   els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
+  els.quickCodeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
+  els.quickCodeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
   updatePaneToggleButton(els.hideInputBtn, layoutState.showInput, "input");
   updatePaneToggleButton(els.hideOutputBtn, layoutState.showOutput, "output");
   localStorage.setItem("rathee.codeSide", layoutState.codeSide);
@@ -452,6 +552,12 @@ function setCodeEditorPlacement(side) {
   applyWorkspaceLayout();
 }
 
+function toggleEditorQuickSettings() {
+  editorQuickSettingsOpen = !editorQuickSettingsOpen;
+  els.editorQuickSettings.hidden = !editorQuickSettingsOpen;
+  els.editorQuickSettingsBtn.setAttribute("aria-expanded", String(editorQuickSettingsOpen));
+}
+
 function initResizablePanes() {
   els.mainResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "main"));
   els.drawerResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "drawer"));
@@ -500,14 +606,28 @@ function clamp(value, min, max) {
 }
 
 function switchLanguage() {
-  saveCurrentState();
-  const language = els.language.value;
+  const nextLanguage = els.language.value;
+  const previousLanguage = currentLanguage;
+  if (nextLanguage !== previousLanguage) {
+    els.language.value = previousLanguage;
+    saveCurrentState();
+    els.language.value = nextLanguage;
+  } else {
+    saveCurrentState();
+  }
+  currentLanguage = nextLanguage;
+  const language = nextLanguage;
+  els.quickLanguage.value = language;
   els.fileTabs.classList.toggle("python-mode", language === "python");
   editorView = "code";
   updateDrawerActiveItem();
   setEditorLanguage(language);
-  setEditorCode(language === "python" ? pythonCode : activeCppFile ? cppFiles[activeCppFile] : "");
-  els.input.value = language === "python" ? pythonInput : cppInputs[activeCppFile];
+  const activeFile = language === "python" ? activePyFile : activeCppFile;
+  const files = language === "python" ? pyFiles : cppFiles;
+  const inputs = language === "python" ? pyInputs : cppInputs;
+  setEditorCode(activeFile ? files[activeFile] : "");
+  els.input.value = activeFile ? inputs[activeFile] || "" : "";
+  renderFileTabs();
   updateEditorEmptyState();
   updateEditorActionButton();
   setStatus("Idle", "idle");
@@ -515,7 +635,11 @@ function switchLanguage() {
 
 function openProblemCode() {
   switchEditorView("code");
-  loadWorkspaceCppFiles();
+  if (els.language.value === "python") {
+    loadWorkspacePythonFiles();
+  } else {
+    loadWorkspaceCppFiles();
+  }
 }
 
 function toggleDrawer() {
@@ -648,9 +772,10 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
     applyContestProblems(result, { source: "saved" });
     if (targetProblemIndex) {
-      const targetFilename = `${targetProblemIndex}.cpp`;
-      if (cppFileNames.includes(targetFilename) && activeCppFile !== targetFilename) {
-        switchCppFile(targetFilename);
+      const extension = els.language.value === "python" ? ".py" : ".cpp";
+      const targetFilename = `${targetProblemIndex}${extension}`;
+      if (currentFileNames().includes(targetFilename) && currentActiveFile() !== targetFilename) {
+        switchCodeFile(targetFilename);
       }
     }
   } catch (error) {
@@ -664,38 +789,75 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
 }
 
 function switchEditorView(view) {
-  if (view !== "code" && els.language.value !== "cpp") {
+  saveCurrentState();
+  if (view === "template" || view === "headers") {
     els.language.value = "cpp";
   }
-  saveCurrentState();
+  if (view === "python-template") {
+    els.language.value = "python";
+  }
+  currentLanguage = els.language.value;
+  els.quickLanguage.value = els.language.value;
   editorView = view;
-  setEditorLanguage("cpp");
+  setEditorLanguage(view === "python-template" ? "python" : "cpp");
   setEditorCode(getCurrentEditorBuffer());
   updateDrawerActiveItem();
   renderFileTabs();
   updateEditorEmptyState();
   updateEditorActionButton();
-  setStatus(view === "headers" ? "Headers.hpp" : view === "template" ? "Template.cpp" : "Code", "idle");
+  setStatus(templateViewFilename(view) || "Code", "idle");
 }
 
 function getCurrentEditorBuffer() {
   if (editorView === "headers") return cppHeaders;
   if (editorView === "template") return cppTemplate;
-  return els.language.value === "python" ? pythonCode : cppFiles[activeCppFile];
+  if (editorView === "python-template") return pythonCode;
+  return els.language.value === "python" ? pyFiles[activePyFile] || "" : cppFiles[activeCppFile] || "";
 }
 
 function updateDrawerActiveItem() {
   els.codeFileBtn.classList.toggle("active", editorView === "code");
 }
 
+function currentFileNames() {
+  return els.language.value === "python" ? pyFileNames : cppFileNames;
+}
+
+function currentFiles() {
+  return els.language.value === "python" ? pyFiles : cppFiles;
+}
+
+function currentInputs() {
+  return els.language.value === "python" ? pyInputs : cppInputs;
+}
+
+function currentTabLabels() {
+  return els.language.value === "python" ? pyTabLabels : cppTabLabels;
+}
+
+function currentActiveFile() {
+  return els.language.value === "python" ? activePyFile : activeCppFile;
+}
+
+function isTemplateEditorView() {
+  return ["template", "headers", "python-template"].includes(editorView);
+}
+
+function templateViewFilename(view = editorView) {
+  if (view === "template") return "Template.cpp";
+  if (view === "headers") return "Headers.hpp";
+  if (view === "python-template") return "Template.py";
+  return "";
+}
+
 function renderFileTabs() {
   els.fileTabs.innerHTML = "";
-  if (editorView === "template" || editorView === "headers") {
-    for (const view of ["template", "headers"]) {
+  if (isTemplateEditorView()) {
+    for (const view of ["template", "headers", "python-template"]) {
       const tab = document.createElement("button");
       tab.type = "button";
       tab.className = "file-tab";
-      tab.textContent = view === "template" ? "Template.cpp" : "Headers.hpp";
+      tab.textContent = templateViewFilename(view);
       tab.title = tab.textContent;
       tab.addEventListener("click", () => switchEditorView(view));
       tab.classList.toggle("active", editorView === view);
@@ -703,58 +865,74 @@ function renderFileTabs() {
     }
     return;
   }
-  for (const filename of cppFileNames) {
+  const fileNames = currentFileNames();
+  const tabLabels = currentTabLabels();
+  const extensionLabel = els.language.value === "python" ? "Python" : "C++";
+  for (const filename of fileNames) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "file-tab";
-    tab.title = cppTabLabels[filename] || filename;
+    tab.title = tabLabels[filename] || filename;
     tab.dataset.file = filename;
     const label = document.createElement("span");
-    label.textContent = cppTabLabels[filename] || filename;
+    label.textContent = tabLabels[filename] || filename;
     const close = document.createElement("span");
     close.className = "tab-close";
     close.textContent = "×";
     close.title = `Close ${filename}`;
     close.addEventListener("click", (event) => {
       event.stopPropagation();
-      closeCppFile(filename);
+      closeCodeFile(filename);
     });
     tab.append(label, close);
-    tab.addEventListener("click", () => switchCppFile(filename));
+    tab.addEventListener("click", () => switchCodeFile(filename));
     els.fileTabs.append(tab);
   }
   const addTab = document.createElement("button");
   addTab.type = "button";
   addTab.className = "file-tab add-file-tab";
   addTab.textContent = "+";
-  addTab.title = "Add next C++ file";
-  addTab.addEventListener("click", addNextCppFile);
+  addTab.title = `Add next ${extensionLabel} file`;
+  addTab.addEventListener("click", addNextCodeFile);
   els.fileTabs.append(addTab);
   updateActiveFileTab();
 }
 
-async function closeCppFile(filename) {
-  if (filename === activeCppFile) {
+async function closeCodeFile(filename) {
+  const isPython = els.language.value === "python";
+  const fileNames = isPython ? pyFileNames : cppFileNames;
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const tabLabels = isPython ? pyTabLabels : cppTabLabels;
+  const problems = isPython ? pyProblems : cppProblems;
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  if (filename === activeFile) {
     clearTimeout(codeSaveTimer);
     codeSaveTimer = null;
   } else {
     saveCurrentState();
   }
-  const index = cppFileNames.indexOf(filename);
-  cppFileNames = cppFileNames.filter((name) => name !== filename);
-  delete cppFiles[filename];
-  delete cppInputs[filename];
-  delete cppTabLabels[filename];
-  delete cppProblems[filename];
+  const index = fileNames.indexOf(filename);
+  const nextFileNames = fileNames.filter((name) => name !== filename);
+  if (isPython) pyFileNames = nextFileNames;
+  else cppFileNames = nextFileNames;
+  delete files[filename];
+  delete inputs[filename];
+  delete tabLabels[filename];
+  delete problems[filename];
   if (codeFileScope === "workspace") {
-    await deleteWorkspaceCppFile(filename).catch(() => {
-      els.meta.textContent = `Could not delete ${filename} from TemporaryCPPFiles`;
+    const remove = isPython ? deleteWorkspacePythonFile : deleteWorkspaceCppFile;
+    const folderName = isPython ? "TemporaryPythonFiles" : "TemporaryCPPFiles";
+    await remove(filename).catch(() => {
+      els.meta.textContent = `Could not delete ${filename} from ${folderName}`;
     });
   }
-  if (activeCppFile === filename) {
-    activeCppFile = cppFileNames[Math.max(0, index - 1)] || cppFileNames[0] || "";
-    setEditorCode(activeCppFile ? cppFiles[activeCppFile] : "");
-    els.input.value = activeCppFile ? cppInputs[activeCppFile] || "" : "";
+  if (activeFile === filename) {
+    const nextActiveFile = nextFileNames[Math.max(0, index - 1)] || nextFileNames[0] || "";
+    if (isPython) activePyFile = nextActiveFile;
+    else activeCppFile = nextActiveFile;
+    setEditorCode(nextActiveFile ? files[nextActiveFile] : "");
+    els.input.value = nextActiveFile ? inputs[nextActiveFile] || "" : "";
   }
   renderFileTabs();
   updateEditorEmptyState();
@@ -762,30 +940,35 @@ async function closeCppFile(filename) {
   els.meta.textContent = `${filename} closed`;
 }
 
-function addNextCppFile() {
-  if (els.language.value !== "cpp") {
-    els.language.value = "cpp";
-    switchLanguage();
-  }
+function addNextCodeFile() {
   saveCurrentState();
-  const filename = nextCppFilename();
-  cppFileNames.push(filename);
-  cppFiles[filename] = cppTemplate;
-  cppInputs[filename] = "";
-  cppTabLabels[filename] = filename;
-  cppProblems[filename] = null;
-  activeCppFile = filename;
+  const isPython = els.language.value === "python";
+  const filename = nextCodeFilename(isPython ? pyFileNames : cppFileNames, isPython ? ".py" : ".cpp");
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const tabLabels = isPython ? pyTabLabels : cppTabLabels;
+  const problems = isPython ? pyProblems : cppProblems;
+  if (isPython) pyFileNames.push(filename);
+  else cppFileNames.push(filename);
+  files[filename] = isPython ? pythonCode : cppTemplate;
+  inputs[filename] = "";
+  tabLabels[filename] = filename;
+  problems[filename] = null;
+  if (isPython) activePyFile = filename;
+  else activeCppFile = filename;
   editorView = "code";
   renderFileTabs();
   updateDrawerActiveItem();
   updateEditorActionButton();
-  setEditorLanguage("cpp");
-  setEditorCode(cppFiles[activeCppFile]);
+  setEditorLanguage(els.language.value);
+  setEditorCode(files[filename]);
   els.input.value = "";
   updateEditorEmptyState();
   if (codeFileScope === "workspace") {
-    saveWorkspaceCppFile(filename, cppFiles[filename]).catch(() => {
-      els.meta.textContent = `Could not create ${filename} in TemporaryCPPFiles`;
+    const save = isPython ? saveWorkspacePythonFile : saveWorkspaceCppFile;
+    const folderName = isPython ? "TemporaryPythonFiles" : "TemporaryCPPFiles";
+    save(filename, files[filename]).catch(() => {
+      els.meta.textContent = `Could not create ${filename} in ${folderName}`;
     });
   }
   setStatus("Created", "success");
@@ -793,16 +976,16 @@ function addNextCppFile() {
 }
 
 function createFirstCppFile() {
-  if (cppFileNames.length === 0) {
-    addNextCppFile();
+  if (currentFileNames().length === 0) {
+    addNextCodeFile();
   }
 }
 
-function nextCppFilename() {
-  const used = new Set(cppFileNames);
+function nextCodeFilename(fileNames, extension) {
+  const used = new Set(fileNames);
   let index = 1;
   while (true) {
-    const filename = `${numberToLetters(index)}.cpp`;
+    const filename = `${numberToLetters(index)}${extension}`;
     if (!used.has(filename)) return filename;
     index += 1;
   }
@@ -819,13 +1002,18 @@ function numberToLetters(index) {
   return label;
 }
 
-function switchCppFile(filename) {
-  if (els.language.value !== "cpp" || filename === activeCppFile) return;
+function switchCodeFile(filename) {
+  const isPython = els.language.value === "python";
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  if (filename === activeFile) return;
   saveCurrentState();
   editorView = "code";
-  activeCppFile = filename;
-  setEditorCode(cppFiles[activeCppFile]);
-  els.input.value = cppInputs[activeCppFile] || "";
+  if (isPython) activePyFile = filename;
+  else activeCppFile = filename;
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  setEditorCode(files[filename]);
+  els.input.value = inputs[filename] || "";
   updateEditorEmptyState();
   updateDrawerActiveItem();
   updateActiveFileTab();
@@ -835,8 +1023,9 @@ function switchCppFile(filename) {
 }
 
 function updateActiveFileTab() {
+  const activeFile = els.language.value === "python" ? activePyFile : activeCppFile;
   els.fileTabs.querySelectorAll(".file-tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.file === activeCppFile);
+    tab.classList.toggle("active", tab.dataset.file === activeFile);
   });
 }
 
@@ -853,9 +1042,16 @@ function saveCurrentState(options = {}) {
     if (markDirty) setTemplateDirty(true);
     return;
   }
-  if (els.language.value === "python") {
+  if (editorView === "python-template") {
     pythonCode = value;
-    pythonInput = els.input.value;
+    if (markDirty) setTemplateDirty(true);
+    return;
+  }
+  if (els.language.value === "python") {
+    if (!activePyFile) return;
+    pyFiles[activePyFile] = value;
+    pyInputs[activePyFile] = els.input.value;
+    scheduleWorkspaceCodeSave();
   } else {
     if (!activeCppFile) return;
     cppFiles[activeCppFile] = value;
@@ -910,81 +1106,111 @@ async function importContest() {
 function applyContestProblems(contest, options = {}) {
   const { source = "import" } = options;
   const problems = contest.problems || [];
+  const isPython = contest.files?.language === "python" || els.language.value === "python";
+  const extension = isPython ? ".py" : ".cpp";
+  const template = isPython ? pythonCode : cppTemplate;
   codeFileScope = "contest";
   activeContestDir = contest.files?.contestDir || recentContest?.contestDir || "";
-  cppFileNames = problems.map((problem) => `${problem.index}.cpp`);
-  cppFiles = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}.cpp`,
-    problem.code ?? cppTemplate
+  const fileNames = problems.map((problem) => `${problem.index}${extension}`);
+  const files = Object.fromEntries(problems.map((problem) => [
+    `${problem.index}${extension}`,
+    problem.code ?? template
   ]));
-  cppInputs = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}.cpp`,
+  const inputs = Object.fromEntries(problems.map((problem) => [
+    `${problem.index}${extension}`,
     problem.samples?.[0]?.input || ""
   ]));
-  cppTabLabels = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}.cpp`,
-    `${problem.index}.cpp - ${problem.name}`
+  const tabLabels = Object.fromEntries(problems.map((problem) => [
+    `${problem.index}${extension}`,
+    `${problem.index}${extension} - ${problem.name}`
   ]));
-  cppProblems = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}.cpp`,
+  const problemMap = Object.fromEntries(problems.map((problem) => [
+    `${problem.index}${extension}`,
     problem
   ]));
-  activeCppFile = cppFileNames[0] || "A.cpp";
+  if (isPython) {
+    pyFileNames = fileNames;
+    pyFiles = files;
+    pyInputs = inputs;
+    pyTabLabels = tabLabels;
+    pyProblems = problemMap;
+    activePyFile = pyFileNames[0] || "A.py";
+  } else {
+    cppFileNames = fileNames;
+    cppFiles = files;
+    cppInputs = inputs;
+    cppTabLabels = tabLabels;
+    cppProblems = problemMap;
+    activeCppFile = cppFileNames[0] || "A.cpp";
+  }
   editorView = "code";
 
-  if (els.language.value !== "cpp") {
-    els.language.value = "cpp";
-  }
+  els.language.value = isPython ? "python" : "cpp";
+  currentLanguage = els.language.value;
+  els.quickLanguage.value = els.language.value;
   renderFileTabs();
   updateDrawerActiveItem();
-  els.fileTabs.classList.remove("python-mode");
-  setEditorLanguage("cpp");
-  setEditorCode(cppFiles[activeCppFile] || cppTemplate);
-  els.input.value = cppInputs[activeCppFile] || "";
+  els.fileTabs.classList.toggle("python-mode", isPython);
+  setEditorLanguage(els.language.value);
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  setEditorCode(files[activeFile] || template);
+  els.input.value = inputs[activeFile] || "";
   updateEditorEmptyState();
   els.output.value = "";
   const sampleCount = problems.filter((problem) => problem.samples?.length).length;
+  const placeholderMessage = contest.placeholder
+    ? `Problem data is not available yet. Placeholder A${extension} through G${extension} files were created from ${isPython ? "Template.py" : "Template.cpp"}.`
+    : "";
   els.debug.textContent = [
     contest.name,
     `${problems.length} problems ${source === "saved" ? "loaded from workspace" : "imported"}.`,
     `${sampleCount} sample inputs loaded.`,
-    source !== "saved" && sampleCount < problems.length
+    placeholderMessage,
+    !contest.placeholder && source !== "saved" && sampleCount < problems.length
       ? "Some sample inputs could not be fetched because Codeforces problem pages are protected from server-side scraping."
       : ""
   ].filter(Boolean).join("\n");
-  showDebug(source !== "saved" && sampleCount < problems.length);
-  setStatus(source === "saved" ? "Loaded" : "Imported", "success");
-  els.meta.textContent = `${problems.length} problems ${source === "saved" ? "loaded" : "imported"} · ${sampleCount} sample inputs loaded`;
+  showDebug(Boolean(placeholderMessage) || (!contest.placeholder && source !== "saved" && sampleCount < problems.length));
+  setStatus(contest.placeholder ? "Placeholder" : source === "saved" ? "Loaded" : "Imported", "success");
+  els.meta.textContent = contest.placeholder
+    ? `${problems.length} placeholder files created · re-import when contest is live`
+    : `${problems.length} problems ${source === "saved" ? "loaded" : "imported"} · ${sampleCount} sample inputs loaded`;
   refreshCodeforcesStatus(false);
 }
 
 async function resetActiveCode() {
-  if (els.language.value !== "cpp" || editorView !== "code" || !activeCppFile) {
+  const isPython = els.language.value === "python";
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  if (editorView !== "code" || !activeFile) {
     setStatus("Code only", "error");
-    els.meta.textContent = activeCppFile ? "Reset Code works on C++ problem tabs" : "Create a C++ file first";
+    els.meta.textContent = `Create a ${isPython ? "Python" : "C++"} file first`;
     return;
   }
   const loaded = await reloadTemplateFilesFromWorkspace({ updateVisible: false, resetDirty: true });
   if (!loaded) return;
-  cppFiles[activeCppFile] = cppTemplate;
-  setEditorCode(cppTemplate);
-  const save = codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
-  await save(activeCppFile, cppTemplate).catch(() => {
-    els.meta.textContent = `Could not save ${activeCppFile} after reset`;
+  const template = isPython ? pythonCode : cppTemplate;
+  const files = isPython ? pyFiles : cppFiles;
+  files[activeFile] = template;
+  setEditorCode(template);
+  const save = isPython
+    ? codeFileScope === "contest" ? saveContestPythonFile : saveWorkspacePythonFile
+    : codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
+  await save(activeFile, template).catch(() => {
+    els.meta.textContent = `Could not save ${activeFile} after reset`;
   });
   setStatus("Reset", "success");
-  els.meta.textContent = `${activeCppFile} reset to Template.cpp`;
+  els.meta.textContent = `${activeFile} reset to ${isPython ? "Template.py" : "Template.cpp"}`;
 }
 
 async function reloadOpenWorkspaceFile() {
   const loaded = await reloadTemplateFilesFromWorkspace({ updateVisible: true, resetDirty: true });
   if (!loaded) return;
   setStatus("Reloaded", "success");
-  els.meta.textContent = `${editorView === "template" ? "Template.cpp" : "Headers.hpp"} reloaded from workspace`;
+  els.meta.textContent = `${templateViewFilename()} reloaded from workspace`;
 }
 
 function handleEditorAction() {
-  if (editorView === "template" || editorView === "headers") {
+  if (isTemplateEditorView()) {
     reloadOpenWorkspaceFile();
   } else {
     resetActiveCode();
@@ -992,13 +1218,13 @@ function handleEditorAction() {
 }
 
 function updateEditorActionButton() {
-  if (editorView === "template" || editorView === "headers") {
-    const filename = editorView === "template" ? "Template.cpp" : "Headers.hpp";
+  if (isTemplateEditorView()) {
+    const filename = templateViewFilename();
     els.resetCodeBtn.textContent = "Reload File";
     els.resetCodeBtn.title = `Reload ${filename} from workspace`;
   } else {
     els.resetCodeBtn.textContent = "Load from Template";
-    els.resetCodeBtn.title = "Load active problem code from Template.cpp";
+    els.resetCodeBtn.title = `Load active problem code from ${els.language.value === "python" ? "Template.py" : "Template.cpp"}`;
   }
 }
 
@@ -1006,7 +1232,9 @@ function setEditorFontSize(size) {
   editorFontSize = Math.min(24, Math.max(11, size));
   document.documentElement.style.setProperty("--editor-font-size", `${editorFontSize}px`);
   els.fontSizeLabel.textContent = `${editorFontSize}px`;
+  els.quickFontSizeLabel.textContent = `${editorFontSize}px`;
   els.editorFontSizeInput.value = String(editorFontSize);
+  els.quickEditorFontSizeInput.value = String(editorFontSize);
   localStorage.setItem("forge.editorFontSize", String(editorFontSize));
   requestAnimationFrame(() => codeEditor?.refresh());
 }
@@ -1015,6 +1243,7 @@ function setEditorFontFamily(fontFamily) {
   editorFontFamily = fontFamily || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
   document.documentElement.style.setProperty("--editor-font-family", editorFontFamily);
   els.editorFontSelect.value = editorFontFamily;
+  els.quickEditorFontSelect.value = editorFontFamily;
   localStorage.setItem("rathee.editorFontFamily", editorFontFamily);
   requestAnimationFrame(() => codeEditor?.refresh());
 }
@@ -1048,13 +1277,16 @@ function validCodeforcesHandle() {
 
 async function submitToCodeforces() {
   saveCurrentState();
-  if (!activeCppFile) {
+  const isPython = els.language.value === "python";
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  const problems = isPython ? pyProblems : cppProblems;
+  if (!activeFile) {
     setStatus("No file", "error");
-    els.meta.textContent = "Create a C++ file before submitting";
+    els.meta.textContent = `Create a ${isPython ? "Python" : "C++"} file before submitting`;
     return;
   }
-  const problem = cppProblems[activeCppFile];
-  if (els.language.value !== "cpp" || !problem?.contestId || !problem?.index) {
+  const problem = problems[activeFile];
+  if (!problem?.contestId || !problem?.index) {
     setStatus("No CF tab", "error");
     els.meta.textContent = "Import a Codeforces contest and select a problem tab first";
     return;
@@ -1065,7 +1297,7 @@ async function submitToCodeforces() {
   window.open(submitUrl, "_blank", "noopener,noreferrer");
   els.debug.textContent = [
     `Opened ${submitUrl}`,
-    "Combined Headers.hpp + active code file was copied to clipboard.",
+    isPython ? "Active Python file was copied to clipboard." : "Combined Headers.hpp + active code file was copied to clipboard.",
     "Paste it into Codeforces and submit using your logged-in browser session.",
     "Click Status here after submitting, or reload/import again to fetch the latest verdict."
   ].join("\n");
@@ -1083,14 +1315,17 @@ async function copyActiveCode() {
 }
 
 function getSubmitCode() {
-  if (els.language.value !== "cpp") return getEditorCode();
+  if (els.language.value === "python") return activePyFile ? pyFiles[activePyFile] || "" : getEditorCode();
   if (!activeCppFile) return "";
   return combineCppSource(cppFiles[activeCppFile] || "");
 }
 
 function getRunCode() {
-  if (els.language.value !== "cpp") return getEditorCode();
   saveCurrentState();
+  if (els.language.value === "python") {
+    if (editorView === "python-template") return pythonCode;
+    return activePyFile ? pyFiles[activePyFile] || "" : "";
+  }
   if (editorView === "template" || editorView === "headers") return combineCppSource(cppTemplate);
   if (!activeCppFile) return "";
   return combineCppSource(cppFiles[activeCppFile] || "");
@@ -1130,7 +1365,8 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
     return;
   }
 
-  const problem = cppProblems[activeCppFile];
+  const activeFile = currentActiveFile();
+  const problem = els.language.value === "python" ? pyProblems[activeFile] : cppProblems[activeFile];
   if (!problem?.contestId || !problem?.index) {
     if (showWhenEmpty) {
       setStatus("No CF tab", "error");
@@ -1184,9 +1420,10 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
 async function submit(mode) {
   if (busy) return;
   saveCurrentState();
-  if (els.language.value === "cpp" && editorView === "code" && !activeCppFile) {
+  const activeFile = currentActiveFile();
+  if (editorView === "code" && !activeFile) {
     setStatus("No file", "error");
-    els.meta.textContent = "Create a C++ file with + before running";
+    els.meta.textContent = `Create a ${els.language.value === "python" ? "Python" : "C++"} file with + before running`;
     return;
   }
   busy = true;
