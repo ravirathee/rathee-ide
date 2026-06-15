@@ -31,11 +31,12 @@
               </span>
               <span>Submit</span>
             </button>
-            <button id="settingsBtn" class="icon-button settings-button" title="Settings">⚙</button>
           </div>
           <div class="right-actions">
+            <button id="settingsBtn" class="icon-button settings-button" title="Settings"><span class="settings-icon">⚙</span></button>
+            <a class="cf-home-button" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer" title="Open Codeforces">CF</a>
             <label class="contest-wrap" title="Codeforces contest URL">
-              <span>Codeforces</span>
+              <a id="contestListLink" class="contest-link-label" href="https://codeforces.com/contests" target="_blank" rel="noopener noreferrer">Codeforces</a>
               <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
               <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
             </label>
@@ -68,17 +69,19 @@
             <div id="fileTabs" class="file-tabs" aria-label="Code files"></div>
             <div class="editor-actions">
               <button id="saveTemplateBtn" class="small-button dirty-action" hidden>Save</button>
-              <button id="resetCodeBtn" class="small-button">Load from Template</button>
               <span id="statusPill" class="status idle">Idle</span>
               <button id="editorQuickSettingsBtn" class="editor-quick-toggle" title="Code editor settings" aria-label="Code editor settings" aria-expanded="false">&gt;</button>
             </div>
           </div>
           <div id="editorQuickSettings" class="editor-quick-settings" hidden>
-            <label class="quick-setting">
+            <div class="quick-setting quick-font-size-setting">
               <span>Font size</span>
-              <input id="quickEditorFontSizeInput" type="range" min="11" max="24" step="1" />
-              <strong id="quickFontSizeLabel">15px</strong>
-            </label>
+              <div class="quick-stepper" role="group" aria-label="Editor font size">
+                <button id="quickFontDownBtn" type="button" aria-label="Decrease editor font size">-</button>
+                <strong id="quickFontSizeLabel">15px</strong>
+                <button id="quickFontUpBtn" type="button" aria-label="Increase editor font size">+</button>
+              </div>
+            </div>
             <label class="quick-setting">
               <span>Font</span>
               <select id="quickEditorFontSelect">
@@ -89,6 +92,13 @@
                 <option value="Fira Code, ui-monospace, SFMono-Regular, Menlo, monospace">Fira Code</option>
               </select>
             </label>
+            <label class="quick-setting quick-language-setting">
+              <span>Language</span>
+              <select id="quickLanguage">
+                <option value="python">Python 3</option>
+                <option value="cpp">C++17</option>
+              </select>
+            </label>
             <div class="quick-setting quick-segment-setting">
               <span>Placement</span>
               <div class="quick-segments" role="group" aria-label="Code editor placement">
@@ -96,13 +106,7 @@
                 <button id="quickCodeRightBtn" type="button">Right</button>
               </div>
             </div>
-            <label class="quick-setting">
-              <span>Language</span>
-              <select id="quickLanguage">
-                <option value="python">Python 3</option>
-                <option value="cpp">C++17</option>
-              </select>
-            </label>
+            <button id="resetCodeBtn" class="quick-action-button" type="button">Load from Template</button>
           </div>
           <textarea id="code" spellcheck="false" wrap="off" aria-label="Code editor"></textarea>
           <div id="emptyEditorState" class="empty-editor-state" hidden>

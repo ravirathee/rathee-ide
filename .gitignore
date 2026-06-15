@@ -4,8 +4,13 @@ workspace/main.cpp
 workspace/main.out
 workspace/main.out.dSYM/
 workspace/[A-Z]*.cpp
-!workspace/Template.cpp
-!workspace/Template.py
+workspace/Template.cpp
+workspace/Template.py
+workspace/Headers.hpp
+!workspace/Templates/
+!workspace/Templates/Template.cpp
+!workspace/Templates/Template.py
+!workspace/Templates/Headers.hpp
 workspace/TemporaryCPPFiles/*
 !workspace/TemporaryCPPFiles/.gitkeep
 workspace/TemporaryPythonFiles/*
@@ -14,3 +19,5 @@ workspace/contests/*
 !workspace/contests/.gitkeep
 workspace/input.txt
 workspace/output.txt
+workspace/IOFiles/*
+!workspace/IOFiles/.gitkeep

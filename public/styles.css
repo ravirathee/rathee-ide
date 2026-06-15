@@ -111,8 +111,38 @@ h1 {
   font-size: 0.78rem;
 }
 
-.contest-wrap span {
+.contest-wrap span,
+.contest-link-label {
   font-size: 0.72rem;
+}
+
+.contest-link-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.contest-link-label:hover {
+  color: var(--accent);
+}
+
+.cf-home-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--accent);
+  background: rgba(47, 198, 162, 0.1);
+  text-decoration: none;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.cf-home-button:hover {
+  border-color: var(--accent);
+  background: rgba(47, 198, 162, 0.16);
 }
 
 .toolbar {
@@ -140,7 +170,7 @@ h1 {
   position: absolute;
   right: 0;
   justify-content: flex-end;
-  max-width: min(470px, 48vw);
+  max-width: min(498px, 48.5vw);
 }
 
 .contest-wrap {
@@ -149,14 +179,14 @@ h1 {
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 0 50px 0 9px;
+  padding: 0 60px 0 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
 }
 
 .contest-wrap {
-  width: min(390px, 38vw);
+  width: min(458px, 40.5vw);
 }
 
 select {
@@ -251,15 +281,14 @@ button:disabled {
 
 .import-button {
   position: absolute;
-  top: 50%;
+  top: 4px;
   right: 6px;
   display: inline-grid;
   place-items: center;
-  width: 34px;
+  width: 48px;
   min-height: 24px;
   padding: 0;
   border-radius: 7px;
-  transform: translateY(-50%);
   color: #061511;
   border-color: rgba(47, 198, 162, 0.72);
   background: linear-gradient(180deg, #42d8b7, #2fc6a2);
@@ -290,9 +319,18 @@ button:disabled {
 }
 
 .settings-button {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  padding: 0;
   color: var(--text);
-  font-size: 1.28rem;
+  font-size: 1.7rem;
   line-height: 1;
+}
+
+.settings-icon {
+  display: inline-block;
+  transform: translateY(-1px);
 }
 
 .layout-toggle {
@@ -726,11 +764,12 @@ body.resizing .resize-handle::after {
 }
 
 .editor-quick-settings {
-  display: grid;
-  grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 0.8fr) minmax(180px, 0.8fr) minmax(140px, 0.7fr);
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--line);
   background: rgba(20, 23, 30, 0.88);
 }
@@ -742,11 +781,12 @@ body.resizing .resize-handle::after {
 .quick-setting {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  flex: 0 0 170px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 30px;
+  padding: 0 7px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #141720;
@@ -764,17 +804,47 @@ body.resizing .resize-handle::after {
   text-align: right;
 }
 
-.quick-setting input,
 .quick-setting select {
   min-height: 28px;
   font-size: 0.76rem;
 }
 
-.quick-setting:first-child {
-  grid-template-columns: auto minmax(70px, 1fr) 38px;
+.quick-font-size-setting {
+  flex: 0 0 168px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.quick-setting:has(#quickEditorFontSelect) {
+  flex: 0 0 164px;
+}
+
+.quick-language-setting {
+  flex: 0 0 136px;
+}
+
+.quick-stepper {
+  display: grid;
+  grid-template-columns: 26px 40px 26px;
+  align-items: center;
+  gap: 3px;
+}
+
+.quick-stepper button {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.quick-stepper strong {
+  text-align: center;
 }
 
 .quick-segment-setting {
+  flex: 0 0 178px;
   grid-template-columns: auto minmax(0, 1fr);
 }
 
@@ -785,15 +855,32 @@ body.resizing .resize-handle::after {
 }
 
 .quick-segments button {
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 8px;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 
 .quick-segments button.active {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(47, 198, 162, 0.1);
+}
+
+.quick-action-button {
+  flex: 0 0 138px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--accent);
+  border-color: rgba(47, 198, 162, 0.45);
+  background: rgba(47, 198, 162, 0.08);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.quick-action-button:hover {
+  background: rgba(47, 198, 162, 0.14);
 }
 
 .file-tabs {
@@ -963,11 +1050,17 @@ textarea,
   width: 100%;
   height: 100%;
   min-height: 0;
+  align-self: stretch;
+  justify-self: stretch;
   background: #111318;
   color: var(--text);
   font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   line-height: 1.55;
+}
+
+.CodeMirror-scroll {
+  min-height: 100%;
 }
 
 .CodeMirror-gutters {
@@ -1328,10 +1421,6 @@ textarea,
   .app-shell[data-code-side="right"] .editor-pane,
   .app-shell[data-code-side="right"] .side-pane {
     margin: 0;
-  }
-
-  .editor-quick-settings {
-    grid-template-columns: 1fr;
   }
 
   .settings-modal {

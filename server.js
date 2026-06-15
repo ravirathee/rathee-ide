@@ -11,9 +11,19 @@ const publicDir = path.join(__dirname, "public");
 const workspaceDir = path.join(__dirname, "workspace");
 const temporaryCppFilesDir = path.join(workspaceDir, "TemporaryCPPFiles");
 const temporaryPythonFilesDir = path.join(workspaceDir, "TemporaryPythonFiles");
-const templateCppPath = path.join(workspaceDir, "Template.cpp");
-const headersPath = path.join(workspaceDir, "Headers.hpp");
-const templatePythonPath = path.join(workspaceDir, "Template.py");
+const templatesDir = path.join(workspaceDir, "Templates");
+const ioFilesDir = path.join(workspaceDir, "IOFiles");
+const inputFilePath = path.join(ioFilesDir, "input.txt");
+const outputFilePath = path.join(ioFilesDir, "output.txt");
+const legacyInputFilePath = path.join(workspaceDir, "input.txt");
+const legacyOutputFilePath = path.join(workspaceDir, "output.txt");
+const templateCppPath = path.join(templatesDir, "Template.cpp");
+const headersPath = path.join(templatesDir, "Headers.hpp");
+const templatePythonPath = path.join(templatesDir, "Template.py");
+const legacyTemplateCppPath = path.join(workspaceDir, "Template.cpp");
+const legacyHeadersPath = path.join(workspaceDir, "Headers.hpp");
+const legacyTemplatePythonPath = path.join(workspaceDir, "Template.py");
+const appSettingsPath = path.join(workspaceDir, "AppSettings.json");
 const contestPythonDirName = "zPY";
 const contestDataDirName = "zContestData";
 const legacyContestPythonDirNames = ["py", "PythonFiles", "PythodCode"];
@@ -32,7 +42,9 @@ const mime = {
 
 await Promise.all([
   mkdir(temporaryCppFilesDir, { recursive: true }),
-  mkdir(temporaryPythonFilesDir, { recursive: true })
+  mkdir(temporaryPythonFilesDir, { recursive: true }),
+  mkdir(templatesDir, { recursive: true }),
+  mkdir(ioFilesDir, { recursive: true })
 ]);
 
 const server = http.createServer(async (req, res) => {
@@ -46,10 +58,21 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/files") {
       const [input, output] = await Promise.all([
-        readTextIfExists(path.join(workspaceDir, "input.txt")),
-        readTextIfExists(path.join(workspaceDir, "output.txt"))
+        readTextWithFallback(inputFilePath, legacyInputFilePath),
+        readTextWithFallback(outputFilePath, legacyOutputFilePath)
       ]);
       return sendJson(res, 200, { input, output });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/settings") {
+      const settings = await readJsonIfExists(appSettingsPath);
+      return sendJson(res, 200, { settings: settings || {} });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/settings") {
+      const body = await readJsonBody(req);
+      await writeFile(appSettingsPath, JSON.stringify(body.settings || {}, null, 2), "utf8");
+      return sendJson(res, 200, { ok: true });
     }
 
     if (req.method === "GET" && url.pathname === "/api/template-files") {
@@ -62,6 +85,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/template-files") {
       const body = await readJsonBody(req);
+      await mkdir(templatesDir, { recursive: true });
       await Promise.all([
         writeFile(templateCppPath, String(body.template ?? ""), "utf8"),
         writeFile(headersPath, String(body.headers ?? ""), "utf8"),
@@ -204,13 +228,24 @@ async function readTextIfExists(filePath) {
   return readFile(filePath, "utf8").catch(() => "");
 }
 
+async function readJsonIfExists(filePath) {
+  return readFile(filePath, "utf8")
+    .then((value) => JSON.parse(value))
+    .catch(() => null);
+}
+
 async function readTemplateBundle() {
   const [template, headers, python] = await Promise.all([
-    readTextIfExists(templateCppPath),
-    readTextIfExists(headersPath),
-    readTextIfExists(templatePythonPath)
+    readTextWithFallback(templateCppPath, legacyTemplateCppPath),
+    readTextWithFallback(headersPath, legacyHeadersPath),
+    readTextWithFallback(templatePythonPath, legacyTemplatePythonPath)
   ]);
   return { template, headers, python };
+}
+
+async function readTextWithFallback(primaryPath, fallbackPath) {
+  const primary = await readTextIfExists(primaryPath);
+  return primary || readTextIfExists(fallbackPath);
 }
 
 async function listWorkspaceCodeFiles({ directory, extension }) {
@@ -714,9 +749,10 @@ async function executeCode({ language, code, input = "", mode = "run" }) {
   const extension = language === "python" ? "py" : "cpp";
   const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-run-"));
   const source = path.join(runDir, `main.${extension}`);
-  const inputFile = path.join(workspaceDir, "input.txt");
-  const outputFile = path.join(workspaceDir, "output.txt");
+  const inputFile = inputFilePath;
+  const outputFile = outputFilePath;
   try {
+    await mkdir(ioFilesDir, { recursive: true });
     await Promise.all([
       writeFile(source, String(code ?? ""), "utf8"),
       writeFile(inputFile, String(input ?? ""), "utf8"),

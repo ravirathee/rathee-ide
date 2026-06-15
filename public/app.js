@@ -19,6 +19,7 @@ const els = {
   hideInputBtn: document.querySelector("#hideInputBtn"),
   hideOutputBtn: document.querySelector("#hideOutputBtn"),
   fileTabs: document.querySelector("#fileTabs"),
+  contestListLink: document.querySelector("#contestListLink"),
   contestUrl: document.querySelector("#contestUrl"),
   importContestBtn: document.querySelector("#importContestBtn"),
   cfSubmitBtn: document.querySelector("#cfSubmitBtn"),
@@ -41,7 +42,8 @@ const els = {
   resetCodeBtn: document.querySelector("#resetCodeBtn"),
   editorQuickSettingsBtn: document.querySelector("#editorQuickSettingsBtn"),
   editorQuickSettings: document.querySelector("#editorQuickSettings"),
-  quickEditorFontSizeInput: document.querySelector("#quickEditorFontSizeInput"),
+  quickFontDownBtn: document.querySelector("#quickFontDownBtn"),
+  quickFontUpBtn: document.querySelector("#quickFontUpBtn"),
   quickFontSizeLabel: document.querySelector("#quickFontSizeLabel"),
   quickEditorFontSelect: document.querySelector("#quickEditorFontSelect"),
   quickCodeLeftBtn: document.querySelector("#quickCodeLeftBtn"),
@@ -95,6 +97,7 @@ let settingEditorValue = false;
 let codeSaveTimer = null;
 let currentLanguage = document.querySelector("#language").value;
 let editorQuickSettingsOpen = false;
+let settingsSaveTimer = null;
 let layoutState = {
   showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
@@ -105,7 +108,68 @@ let layoutState = {
   inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45)
 };
 
-boot();
+loadAppSettings().finally(boot);
+
+async function loadAppSettings() {
+  try {
+    const res = await fetch(`/api/settings?ts=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load settings.");
+    applyAppSettings(data.settings || {});
+  } catch {
+    // localStorage defaults above keep older installs working if the settings file is unavailable.
+  }
+}
+
+function applyAppSettings(settings) {
+  if (settings.recentContest !== undefined) recentContest = settings.recentContest || null;
+  if (typeof settings.codeforcesHandle === "string") codeforcesHandle = settings.codeforcesHandle;
+  if (Number.isFinite(Number(settings.editorFontSize))) editorFontSize = Number(settings.editorFontSize);
+  if (typeof settings.editorFontFamily === "string") editorFontFamily = settings.editorFontFamily;
+  if (typeof settings.language === "string" && ["cpp", "python"].includes(settings.language)) {
+    els.language.value = settings.language;
+    currentLanguage = settings.language;
+  }
+
+  const layout = settings.layout || {};
+  if (Number.isFinite(Number(layout.drawerWidth))) layoutState.drawerWidth = Number(layout.drawerWidth);
+  if (["left", "right"].includes(layout.codeSide)) layoutState.codeSide = layout.codeSide;
+  if (typeof layout.showInput === "boolean") layoutState.showInput = layout.showInput;
+  if (typeof layout.showOutput === "boolean") layoutState.showOutput = layout.showOutput;
+  if (Number.isFinite(Number(layout.sideWidth))) layoutState.sideWidth = Number(layout.sideWidth);
+  if (Number.isFinite(Number(layout.inputHeight))) layoutState.inputHeight = Number(layout.inputHeight);
+}
+
+function currentAppSettings() {
+  return {
+    recentContest,
+    codeforcesHandle,
+    editorFontSize,
+    editorFontFamily,
+    language: els.language.value,
+    layout: {
+      drawerWidth: layoutState.drawerWidth,
+      codeSide: layoutState.codeSide,
+      showInput: layoutState.showInput,
+      showOutput: layoutState.showOutput,
+      sideWidth: layoutState.sideWidth,
+      inputHeight: layoutState.inputHeight
+    }
+  };
+}
+
+function scheduleAppSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => {
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: currentAppSettings() })
+    }).catch(() => {
+      // Settings still remain active in memory if the file write fails.
+    });
+  }, 250);
+}
 
 function boot() {
   renderFileTabs();
@@ -145,7 +209,8 @@ function boot() {
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
   els.editorQuickSettingsBtn.addEventListener("click", toggleEditorQuickSettings);
-  els.quickEditorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.quickEditorFontSizeInput.value)));
+  els.quickFontDownBtn.addEventListener("click", () => setEditorFontSize(editorFontSize - 1));
+  els.quickFontUpBtn.addEventListener("click", () => setEditorFontSize(editorFontSize + 1));
   els.quickEditorFontSelect.addEventListener("change", () => setEditorFontFamily(els.quickEditorFontSelect.value));
   els.quickCodeLeftBtn.addEventListener("click", () => setCodeEditorPlacement("left"));
   els.quickCodeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
@@ -153,6 +218,7 @@ function boot() {
     els.language.value = els.quickLanguage.value;
     switchLanguage();
   });
+  els.contestListLink.addEventListener("click", (event) => event.stopPropagation());
   els.contestUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") importContest();
   });
@@ -392,6 +458,7 @@ function initCodeEditor() {
     ...codeMirrorOptions(),
     mode: "text/x-c++src"
   });
+  codeEditor.setSize("100%", "100%");
 }
 
 function codeMirrorOptions() {
@@ -482,6 +549,7 @@ function applyWorkspaceLayout() {
   localStorage.setItem("rathee.showOutput", String(layoutState.showOutput));
   localStorage.setItem("rathee.sideWidth", String(layoutState.sideWidth));
   localStorage.setItem("rathee.inputHeight", String(layoutState.inputHeight));
+  scheduleAppSettingsSave();
 
   requestAnimationFrame(() => codeEditor?.refresh());
 }
@@ -556,6 +624,10 @@ function toggleEditorQuickSettings() {
   editorQuickSettingsOpen = !editorQuickSettingsOpen;
   els.editorQuickSettings.hidden = !editorQuickSettingsOpen;
   els.editorQuickSettingsBtn.setAttribute("aria-expanded", String(editorQuickSettingsOpen));
+  requestAnimationFrame(() => {
+    codeEditor?.setSize("100%", "100%");
+    codeEditor?.refresh();
+  });
 }
 
 function initResizablePanes() {
@@ -618,6 +690,7 @@ function switchLanguage() {
   currentLanguage = nextLanguage;
   const language = nextLanguage;
   els.quickLanguage.value = language;
+  scheduleAppSettingsSave();
   els.fileTabs.classList.toggle("python-mode", language === "python");
   editorView = "code";
   updateDrawerActiveItem();
@@ -770,6 +843,7 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
       contestDir: result.files?.contestDir || contest.contestDir || ""
     };
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
+    scheduleAppSettingsSave();
     applyContestProblems(result, { source: "saved" });
     if (targetProblemIndex) {
       const extension = els.language.value === "python" ? ".py" : ".cpp";
@@ -1092,6 +1166,7 @@ async function importContest() {
       contestDir: result.files?.contestDir || ""
     };
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
+    scheduleAppSettingsSave();
     await loadSavedContestList();
   } catch (error) {
     els.debug.textContent = error.message;
@@ -1234,8 +1309,8 @@ function setEditorFontSize(size) {
   els.fontSizeLabel.textContent = `${editorFontSize}px`;
   els.quickFontSizeLabel.textContent = `${editorFontSize}px`;
   els.editorFontSizeInput.value = String(editorFontSize);
-  els.quickEditorFontSizeInput.value = String(editorFontSize);
   localStorage.setItem("forge.editorFontSize", String(editorFontSize));
+  scheduleAppSettingsSave();
   requestAnimationFrame(() => codeEditor?.refresh());
 }
 
@@ -1245,6 +1320,7 @@ function setEditorFontFamily(fontFamily) {
   els.editorFontSelect.value = editorFontFamily;
   els.quickEditorFontSelect.value = editorFontFamily;
   localStorage.setItem("rathee.editorFontFamily", editorFontFamily);
+  scheduleAppSettingsSave();
   requestAnimationFrame(() => codeEditor?.refresh());
 }
 
@@ -1252,6 +1328,7 @@ function setCodeforcesHandle(handle) {
   codeforcesHandle = normalizeCodeforcesHandle(handle);
   els.codeforcesHandleInput.value = codeforcesHandle;
   localStorage.setItem("rathee.codeforcesHandle", codeforcesHandle);
+  scheduleAppSettingsSave();
 }
 
 function normalizeCodeforcesHandle(value) {
