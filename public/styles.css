@@ -287,19 +287,19 @@ h1 {
   place-items: center;
   width: 38px;
   min-height: 34px;
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text);
+  background: var(--panel-2);
   text-decoration: none;
   font-size: 0.78rem;
   font-weight: 900;
-  transition: background var(--t-fast), border-color var(--t-fast);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
 
 .cf-home-button:hover {
   border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--accent);
 }
 
 .toolbar {
@@ -318,6 +318,15 @@ h1 {
   gap: 6px;
 }
 
+/* keep every toolbar control the same height as the Play/Submit buttons (36px);
+   the import button lives inside the URL box and keeps its own smaller size */
+.center-actions button,
+.right-actions button:not(.import-button),
+.right-actions .cf-home-button,
+.right-actions .contest-wrap {
+  min-height: 36px;
+}
+
 .center-actions {
   justify-content: center;
   transform: translateX(-190px);
@@ -327,25 +336,73 @@ h1 {
   position: absolute;
   right: 0;
   justify-content: flex-end;
-  max-width: min(498px, 48.5vw);
+  max-width: min(880px, 70vw);
+}
+
+/* fixed footprint so expanding the URL box never pushes neighboring buttons */
+.contest-slot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 124px;
+  min-height: 36px;
 }
 
 .contest-wrap {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 0 60px 0 10px;
+  min-height: 36px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  width: min(458px, 40.5vw);
-  transition: border-color var(--t-fast);
+  /* opaque: tint layered over the solid page bg so buttons behind don't show through when expanded */
+  background: linear-gradient(var(--panel-2), var(--panel-2)), var(--bg);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  width: 124px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: width var(--t), padding var(--t), border-color var(--t-fast), box-shadow var(--t-fast);
 }
 
+/* expand leftward as an overlay to reveal the full URL on hover or while editing */
+.contest-wrap:hover,
 .contest-wrap:focus-within {
+  width: min(424px, 42vw);
+  padding-right: 50px;
   border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: var(--shadow);
+}
+
+.contest-number-chip {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+/* collapsed: show the number, hide the URL input + import button */
+#contestUrl {
+  display: none;
+}
+
+.contest-wrap:hover #contestUrl,
+.contest-wrap:focus-within #contestUrl {
+  display: block;
+}
+
+.contest-wrap:hover .contest-number-chip,
+.contest-wrap:focus-within .contest-number-chip {
+  display: none;
+}
+
+.contest-wrap:not(:hover):not(:focus-within) .import-button {
+  display: none;
 }
 
 select {
@@ -497,10 +554,9 @@ button:disabled {
 .settings-button {
   display: inline-grid;
   place-items: center;
-  width: 40px;
   padding: 0;
   color: var(--text);
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   line-height: 1;
 }
 
@@ -511,11 +567,19 @@ button:disabled {
 .settings-icon {
   display: grid;
   place-items: center;
-  width: 1em;
-  height: 1em;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
   transform-origin: 50% 50%;
   transition: transform 0.4s ease;
+}
+
+.settings-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
 }
 
 .settings-button:hover .settings-icon {
@@ -697,6 +761,98 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.saved-contests-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.saved-contests-header .drawer-label {
+  padding-right: 0;
+}
+
+.contest-sort-dropdown {
+  position: relative;
+  display: inline-flex;
+  padding-right: 10px;
+}
+
+.contest-sort-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.contest-sort-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.contest-sort-button:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.contest-sort-button[aria-expanded="true"] {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.contest-sort-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 90;
+  display: grid;
+  gap: 2px;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow);
+}
+
+.contest-sort-menu[hidden] {
+  display: none;
+}
+
+.contest-sort-item {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.contest-sort-item:hover {
+  background: var(--hover);
+}
+
+.contest-sort-item.active {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
 .saved-contest-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -827,7 +983,7 @@ button:disabled {
 .app-shell[data-code-side="right"] .workspace.side-hidden {
   grid-template-columns: 46px 64px minmax(0, 1fr);
   grid-template-areas: "drawer reveal editor";
-  column-gap: 10px;
+  column-gap: 8px;
 }
 
 .app-shell[data-code-side="right"] .workspace.drawer-open.side-hidden {
@@ -891,38 +1047,24 @@ button:disabled {
   position: relative;
   grid-area: editor;
   grid-template-rows: auto auto 1fr;
-  margin-right: 7px;
-  margin-left: 7px;
 }
 
-.app-shell[data-code-side="right"] .editor-pane {
-  margin-right: 0;
-  margin-left: 7px;
+/* gap from the collapsed drawer rail — there is no resize handle there,
+   so add it as a margin to keep the spacing uniform with the resize channels */
+.app-shell[data-code-side="left"] .workspace:not(.drawer-open) .editor-pane,
+.app-shell[data-code-side="right"] .workspace:not(.drawer-open) .side-pane {
+  margin-left: 8px;
 }
 
-.app-shell[data-code-side="left"] .workspace.drawer-open .editor-pane {
-  margin-left: 0;
-}
-
-.app-shell[data-code-side="right"] .workspace.drawer-open .editor-pane {
-  margin-left: 7px;
-}
-
+/* transparent container — the Input and Output sections are the visible cards */
 .side-pane {
   grid-area: side;
   grid-template-rows: minmax(0, 1fr);
-  margin-left: 7px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-  box-shadow: var(--shadow);
-  transition: background var(--t), border-color var(--t);
-}
-
-.app-shell[data-code-side="right"] .side-pane {
-  margin-left: 0;
-  margin-right: 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
 
 .io-pane {
@@ -934,6 +1076,7 @@ button:disabled {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   box-shadow: none;
+  overflow: visible;
 }
 
 .side-pane[hidden],
@@ -953,7 +1096,7 @@ button:disabled {
   position: absolute;
   inset: 0;
   border-radius: var(--radius-pill);
-  background: var(--line);
+  background: transparent;
   transition: background var(--t-fast);
 }
 
@@ -1104,8 +1247,14 @@ body.resizing .resize-handle::after {
   flex: 0 0 164px;
 }
 
+/* size to content so the full selected language ("Python 3" / "C++17") shows */
 .quick-language-setting {
-  flex: 0 0 136px;
+  flex: 0 0 auto;
+  grid-template-columns: auto auto;
+}
+
+.quick-language-setting select {
+  width: auto;
 }
 
 .quick-stepper {
@@ -1253,13 +1402,53 @@ body.resizing .resize-handle::after {
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+.pane-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.copy-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  line-height: 1;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.copy-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.copy-button:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.copy-button.copied {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
+}
+
 .pane-collapse-button {
   display: inline-grid;
   place-items: center;
   width: 30px;
   height: 30px;
+  min-height: 30px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 1rem;
@@ -1269,8 +1458,8 @@ body.resizing .resize-handle::after {
 }
 
 .pane-collapse-button svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.2;
@@ -1432,6 +1621,13 @@ textarea,
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .io-section.collapsed {
@@ -1450,20 +1646,22 @@ textarea,
   border-bottom: 0;
 }
 
-.input-section.collapsed {
-  border-bottom: 1px solid var(--line);
-}
-
-.output-section.collapsed {
-  border-top: 1px solid var(--line);
-}
-
-.input-section {
-  border-bottom: 1px solid var(--line);
-}
-
 .input-section[hidden] + .output-section {
   border-top: 0;
+}
+
+/* pin each row so hiding the resize handle (display:none) doesn't make grid
+   auto-placement pull the output section into the handle's 0px track */
+.input-section {
+  grid-row: 1;
+}
+
+#ioResizeHandle {
+  grid-row: 2;
+}
+
+.output-section {
+  grid-row: 3;
 }
 
 .empty-message {
@@ -1757,9 +1955,8 @@ textarea,
 .mode-toggle-button {
   display: inline-grid;
   place-items: center;
-  width: 38px;
   color: var(--text);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   line-height: 1;
 }
 
@@ -1868,6 +2065,17 @@ textarea,
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+/* Uniform sizing for the topbar icon buttons (theme, mode, settings, CF, profile). */
+.theme-dropdown-button,
+.mode-toggle-button,
+.settings-button,
+.cf-home-button,
+.profile-button {
+  width: 42px;
+  height: 36px;
+  min-height: 36px;
+}
+
 .profile-menu {
   position: absolute;
   top: calc(100% + 8px);
@@ -1921,21 +2129,93 @@ textarea,
 
 .profile-rating {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
 }
 
-.profile-rating[hidden] {
-  display: none;
+.profile-rating-main,
+.profile-max {
+  grid-column: 1;
+}
+
+.profile-reload-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.profile-reload-button:hover {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.profile-reload-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.profile-reload-button.spinning svg {
+  animation: profile-reload-spin 0.7s linear infinite;
+}
+
+@keyframes profile-reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .profile-rating-main {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+/* topbar rank/rating badge (left of the profile icon) */
+.profile-badge {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  line-height: 1.04;
+  text-align: right;
+}
+
+.profile-badge[hidden] {
+  display: none;
+}
+
+.profile-badge-rank {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: capitalize;
+}
+
+.profile-badge-rating {
+  font-size: 0.72rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-badge-rating[hidden] {
+  display: none;
 }
 
 .profile-rank {

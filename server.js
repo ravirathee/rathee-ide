@@ -322,15 +322,14 @@ async function fetchCodeforcesProblems(contestUrl) {
   const apiUrl = new URL("https://codeforces.com/api/contest.standings");
   apiUrl.searchParams.set("contestId", contestId);
 
-  const response = await fetch(apiUrl, {
+  const { ok, status, data } = await httpsGetJson(apiUrl, {
     headers: {
       "User-Agent": "Forge-IDE/1.0"
     }
   });
-  const data = await response.json().catch(() => null);
 
-  if (!response.ok || data?.status !== "OK") {
-    const message = data?.comment || `Codeforces request failed with ${response.status}.`;
+  if (!ok || data?.status !== "OK") {
+    const message = data?.comment || `Codeforces request failed with ${status}.`;
     const contest = await fetchCodeforcesContestInfo(contestId).catch(() => null);
     if (contest) {
       return buildPlaceholderContest(contestId, contest, message);
@@ -362,14 +361,13 @@ async function fetchCodeforcesProblems(contestUrl) {
 
 async function fetchCodeforcesContestInfo(contestId) {
   const apiUrl = new URL("https://codeforces.com/api/contest.list");
-  const response = await fetch(apiUrl, {
+  const { ok, status, data } = await httpsGetJson(apiUrl, {
     headers: {
       "User-Agent": "Forge-IDE/1.0"
     }
   });
-  const data = await response.json().catch(() => null);
-  if (!response.ok || data?.status !== "OK") {
-    const message = data?.comment || `Codeforces contest list request failed with ${response.status}.`;
+  if (!ok || data?.status !== "OK") {
+    const message = data?.comment || `Codeforces contest list request failed with ${status}.`;
     throw new Error(message);
   }
   return data.result.find((contest) => String(contest.id) === String(contestId)) || null;
@@ -406,15 +404,14 @@ async function fetchCodeforcesStatus({ handle, contestId, index }) {
   apiUrl.searchParams.set("from", "1");
   apiUrl.searchParams.set("count", "20");
 
-  const response = await fetch(apiUrl, {
+  const { ok, status, data } = await httpsGetJson(apiUrl, {
     headers: {
       "User-Agent": "Forge-IDE/1.0"
     }
   });
-  const data = await response.json().catch(() => null);
 
-  if (!response.ok || data?.status !== "OK") {
-    const message = data?.comment || `Codeforces status request failed with ${response.status}.`;
+  if (!ok || data?.status !== "OK") {
+    const message = data?.comment || `Codeforces status request failed with ${status}.`;
     throw new Error(message);
   }
 
@@ -440,21 +437,26 @@ async function fetchCodeforcesStatus({ handle, contestId, index }) {
   return { handle, contestId, index, submissions, latest: submissions[0] || null };
 }
 
-function httpsGetJson(url, { headers = {} } = {}) {
+function httpsGetText(url, { headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, { headers }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => { body += chunk; });
       response.on("end", () => {
-        let data = null;
-        try { data = JSON.parse(body); } catch { /* leave data null on non-JSON */ }
-        resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data });
+        resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, body });
       });
     });
     request.on("error", reject);
     request.setTimeout(10000, () => request.destroy(new Error("Codeforces request timed out.")));
   });
+}
+
+async function httpsGetJson(url, { headers = {} } = {}) {
+  const { ok, status, body } = await httpsGetText(url, { headers });
+  let data = null;
+  try { data = JSON.parse(body); } catch { /* leave data null on non-JSON */ }
+  return { ok, status, data };
 }
 
 const profileCache = new Map();
@@ -646,7 +648,8 @@ async function listSavedContests() {
           index: problem.index,
           name: problem.name
         })),
-        savedAt: metadata.savedAt || ""
+        savedAt: metadata.savedAt || "",
+        lastModifiedAt: await latestCodeFileMtime(contestPath)
       };
     }));
 
@@ -654,6 +657,24 @@ async function listSavedContests() {
     const byId = Number(b.contestId || 0) - Number(a.contestId || 0);
     return byId || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
   });
+}
+
+// Latest edit time of any code file (.cpp/.py) in a contest dir and its python subdirs,
+// ignoring contest.json so a re-fetch doesn't count as "edited a file".
+async function latestCodeFileMtime(contestPath) {
+  const dirs = [contestPath, path.join(contestPath, contestPythonDirName),
+    ...legacyContestPythonDirNames.map((name) => path.join(contestPath, name))];
+  let latest = 0;
+  for (const dir of dirs) {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".cpp") && !entry.name.endsWith(".py")) continue;
+      const info = await stat(path.join(dir, entry.name)).catch(() => null);
+      if (info && info.mtimeMs > latest) latest = info.mtimeMs;
+    }
+  }
+  return latest ? new Date(latest).toISOString() : "";
 }
 
 async function readContestMetadata(contestPath) {
@@ -737,14 +758,13 @@ function safeProblemIndex(index) {
 async function fetchProblemSamples(contestId, index) {
   const problemUrl = `https://codeforces.com/contest/${contestId}/problem/${encodeURIComponent(index)}`;
   try {
-    const response = await fetch(problemUrl, {
+    const { ok, body: html } = await httpsGetText(problemUrl, {
       headers: {
         "User-Agent": "Forge-IDE/1.0"
       }
     });
-    if (!response.ok) return [];
+    if (!ok) return [];
 
-    const html = await response.text();
     if (!/class="sample-test"/i.test(html)) return [];
 
     const sampleBlock = html.match(/<div class="sample-test">([\s\S]*?)<div class="note">/i)?.[1]
@@ -787,21 +807,25 @@ function decodeHtml(value) {
 }
 
 function extractContestId(contestUrl) {
+  const raw = String(contestUrl || "").trim();
+  if (!raw) return "";
+  // bare contest number, e.g. "2231"
+  if (/^\d+$/.test(raw)) return raw;
   try {
-    const url = new URL(contestUrl.trim());
+    const url = new URL(raw);
     if (!/(^|\.)codeforces\.com$/i.test(url.hostname)) return "";
     const parts = url.pathname.split("/").filter(Boolean);
-    const contestIndex = parts.lastIndexOf("contest");
-    if (contestIndex !== -1 && /^\d+$/.test(parts[contestIndex + 1] || "")) {
-      return parts[contestIndex + 1];
+    // .../contest/<id>/... or .../gym/<id>/...
+    for (const key of ["contest", "gym"]) {
+      const idx = parts.lastIndexOf(key);
+      if (idx !== -1 && /^\d+$/.test(parts[idx + 1] || "")) return parts[idx + 1];
     }
-    const gymIndex = parts.lastIndexOf("gym");
-    if (gymIndex !== -1 && /^\d+$/.test(parts[gymIndex + 1] || "")) {
-      return parts[gymIndex + 1];
-    }
+    // .../problemset/problem/<id>/<index>
+    const problemIdx = parts.indexOf("problem");
+    if (problemIdx !== -1 && /^\d+$/.test(parts[problemIdx + 1] || "")) return parts[problemIdx + 1];
     if (/^\d+$/.test(parts[0] || "")) return parts[0];
   } catch {
-    const match = contestUrl.match(/(?:contest|gym)\/(\d+)/i);
+    const match = raw.match(/(?:contest|gym|problem)\/(\d+)/i);
     return match?.[1] || "";
   }
   return "";

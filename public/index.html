@@ -61,14 +61,27 @@
               </div>
             </div>
             <button id="modeToggleBtn" class="icon-button mode-toggle-button" title="Toggle light/dark mode"><span class="mode-icon" aria-hidden="true">☾</span></button>
-            <button id="settingsBtn" class="icon-button settings-button" title="Settings"><span class="settings-icon">⚙</span></button>
+            <button id="settingsBtn" class="icon-button settings-button" title="Settings" aria-label="Settings">
+              <span class="settings-icon">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+                </svg>
+              </span>
+            </button>
             <a class="cf-home-button" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer" title="Open Codeforces">CF</a>
-            <label class="contest-wrap" title="Codeforces contest URL">
-              <a id="contestListLink" class="contest-link-label" href="https://codeforces.com/contests" target="_blank" rel="noopener noreferrer">Codeforces</a>
-              <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
-              <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
-            </label>
+            <div class="contest-slot">
+              <label class="contest-wrap" title="Codeforces contest URL">
+                <a id="contestListLink" class="contest-link-label" href="https://codeforces.com/contests" target="_blank" rel="noopener noreferrer">CF Contest :</a>
+                <span id="contestNumberChip" class="contest-number-chip" aria-hidden="true">—</span>
+                <input id="contestUrl" type="url" placeholder="https://codeforces.com/contest/..." />
+                <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
+              </label>
+            </div>
             <button id="cfStatusBtn">Status</button>
+            <div id="profileBadge" class="profile-badge" hidden>
+              <span id="profileBadgeRank" class="profile-badge-rank"></span>
+              <span id="profileBadgeRating" class="profile-badge-rating"></span>
+            </div>
             <div class="profile-dropdown">
               <button id="profileBtn" class="icon-button profile-button" type="button" aria-haspopup="true" aria-expanded="false" title="Codeforces profile" aria-label="Codeforces profile">
                 <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -81,12 +94,18 @@
                   <span>Codeforces handle</span>
                   <input id="topProfileHandleInput" type="text" placeholder="tourist or profile URL" autocomplete="off" spellcheck="false" />
                 </label>
-                <div id="profileRating" class="profile-rating" hidden>
+                <div id="profileRating" class="profile-rating">
                   <div class="profile-rating-main">
                     <span id="profileRank" class="profile-rank"></span>
                     <span id="profileRatingValue" class="profile-rating-value"></span>
                   </div>
                   <div id="profileMaxRating" class="profile-max"></div>
+                  <button id="profileReloadBtn" class="profile-reload-button" type="button" title="Reload rating from Codeforces" aria-label="Reload rating from Codeforces">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M20 11a8 8 0 1 0-.6 4" />
+                      <path d="M20 4.5V11h-6.5" />
+                    </svg>
+                  </button>
                 </div>
                 <a id="profileOpenLink" class="profile-open-link" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer">Open profile ↗</a>
               </div>
@@ -116,13 +135,27 @@
                 </button>
               </div>
             </div>
-            <button id="codeFileBtn" class="drawer-item saved-contest-btn contest-toggle-btn code-file-btn active" type="button" aria-expanded="true">
+            <button id="codeFileBtn" class="drawer-item saved-contest-btn contest-toggle-btn code-file-btn" type="button" aria-expanded="false">
               <span class="contest-chevron">&gt;</span>
               <span class="contest-title">Temporary Code Files</span>
             </button>
             <div id="tempFileList" class="contest-problem-list temp-file-list"></div>
             <div id="savedContestSection" class="saved-contests" hidden>
-              <div class="drawer-label">Saved Contests</div>
+              <div class="saved-contests-header">
+                <span class="drawer-label">Saved Contests</span>
+                <div class="contest-sort-dropdown">
+                  <button id="contestSortBtn" class="contest-sort-button" type="button" title="Sort saved contests" aria-label="Sort saved contests" aria-expanded="false">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M4 6h16M7 12h10M10 18h4" />
+                    </svg>
+                  </button>
+                  <div id="contestSortMenu" class="contest-sort-menu" role="menu" hidden>
+                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="hosted">Recently hosted</button>
+                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="fetched">Recently fetched</button>
+                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="edited">Recently edited</button>
+                  </div>
+                </div>
+              </div>
               <div id="savedContestList" class="saved-contest-list"></div>
             </div>
           </div>
@@ -135,6 +168,12 @@
             <div class="editor-actions">
               <button id="saveTemplateBtn" class="small-button dirty-action" hidden>Save</button>
               <span id="statusPill" class="status idle">Idle</span>
+              <button id="copyCodeBtn" class="copy-button" title="Copy code" aria-label="Copy code">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                </svg>
+              </button>
               <button id="editorQuickSettingsBtn" class="editor-quick-toggle" title="Code editor settings" aria-label="Code editor settings" aria-expanded="false">&gt;</button>
             </div>
           </div>
@@ -187,12 +226,20 @@
           <section class="io-pane">
           <div class="io-section input-section">
             <div class="pane-head">
-              <span>input.txt</span>
-              <button id="hideInputBtn" class="pane-collapse-button input-collapse-button" title="Hide input panel" aria-label="Hide input panel">
-                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                  <path d="M9 6 L15 12 L9 18" />
-                </svg>
-              </button>
+              <span>Input</span>
+              <div class="pane-head-actions">
+                <button id="copyInputBtn" class="copy-button" title="Copy input" aria-label="Copy input">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                  </svg>
+                </button>
+                <button id="hideInputBtn" class="pane-collapse-button input-collapse-button" title="Hide input panel" aria-label="Hide input panel">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <path d="M9 6 L15 12 L9 18" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
@@ -200,14 +247,22 @@
           <div class="io-section output-section">
             <div class="pane-head">
               <div class="pane-tabs">
-                <button id="outputTabBtn" class="pane-tab active">output.txt</button>
+                <button id="outputTabBtn" class="pane-tab active">Output</button>
                 <button id="debugToggle" class="pane-tab" title="Show debugger diagnostics">Debugger</button>
               </div>
-              <button id="hideOutputBtn" class="pane-collapse-button output-collapse-button" title="Hide output panel" aria-label="Hide output panel">
-                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                  <path d="M9 6 L15 12 L9 18" />
-                </svg>
-              </button>
+              <div class="pane-head-actions">
+                <button id="copyOutputBtn" class="copy-button" title="Copy output" aria-label="Copy output">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                  </svg>
+                </button>
+                <button id="hideOutputBtn" class="pane-collapse-button output-collapse-button" title="Hide output panel" aria-label="Hide output panel">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <path d="M9 6 L15 12 L9 18" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
             <pre id="debug" class="debug-panel inline-debug" hidden aria-label="Debug output"></pre>

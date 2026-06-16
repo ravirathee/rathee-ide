@@ -8,6 +8,10 @@ const els = {
   tempFileList: document.querySelector("#tempFileList"),
   savedContestSection: document.querySelector("#savedContestSection"),
   savedContestList: document.querySelector("#savedContestList"),
+  contestSortDropdown: document.querySelector(".contest-sort-dropdown"),
+  contestSortBtn: document.querySelector("#contestSortBtn"),
+  contestSortMenu: document.querySelector("#contestSortMenu"),
+  contestSortItems: Array.from(document.querySelectorAll(".contest-sort-item")),
   language: document.querySelector("#language"),
   code: document.querySelector("#code"),
   emptyEditorState: document.querySelector("#emptyEditorState"),
@@ -20,9 +24,13 @@ const els = {
   outputTabBtn: document.querySelector("#outputTabBtn"),
   hideInputBtn: document.querySelector("#hideInputBtn"),
   hideOutputBtn: document.querySelector("#hideOutputBtn"),
+  copyInputBtn: document.querySelector("#copyInputBtn"),
+  copyOutputBtn: document.querySelector("#copyOutputBtn"),
+  copyCodeBtn: document.querySelector("#copyCodeBtn"),
   fileTabs: document.querySelector("#fileTabs"),
   contestListLink: document.querySelector("#contestListLink"),
   contestUrl: document.querySelector("#contestUrl"),
+  contestNumberChip: document.querySelector("#contestNumberChip"),
   importContestBtn: document.querySelector("#importContestBtn"),
   cfSubmitBtn: document.querySelector("#cfSubmitBtn"),
   cfStatusBtn: document.querySelector("#cfStatusBtn"),
@@ -52,6 +60,10 @@ const els = {
   profileRank: document.querySelector("#profileRank"),
   profileRatingValue: document.querySelector("#profileRatingValue"),
   profileMaxRating: document.querySelector("#profileMaxRating"),
+  profileReloadBtn: document.querySelector("#profileReloadBtn"),
+  profileBadge: document.querySelector("#profileBadge"),
+  profileBadgeRank: document.querySelector("#profileBadgeRank"),
+  profileBadgeRating: document.querySelector("#profileBadgeRating"),
   openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
   openHeadersFileBtn: document.querySelector("#openHeadersFileBtn"),
   openPythonTemplateFileBtn: document.querySelector("#openPythonTemplateFileBtn"),
@@ -101,6 +113,10 @@ let pyProblems = {};
 let activePyFile = "A.py";
 let codeFileScope = "workspace";
 let activeContestDir = "";
+// Names of the temporary workspace files, cached separately so the "Temporary
+// Code Files" list stays populated even while a contest is the active scope.
+let tempCppNames = [];
+let tempPyNames = [];
 let pythonCode = "";
 let editorView = "code";
 let cppTemplate = "";
@@ -108,8 +124,12 @@ let cppHeaders = "";
 let templateDirty = false;
 let recentContest = JSON.parse(localStorage.getItem("rathee.recentContest") || "null");
 let savedContests = [];
+const contestSortModes = ["hosted", "fetched", "edited"];
+let contestSortMode = contestSortModes.includes(localStorage.getItem("rathee.contestSortMode"))
+  ? localStorage.getItem("rathee.contestSortMode")
+  : "hosted";
 let expandedContestKeys = new Set();
-let tempFilesExpanded = true;
+let tempFilesExpanded = false;
 let codeforcesHandle = localStorage.getItem("rathee.codeforcesHandle") || "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
 let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
@@ -230,14 +250,10 @@ function boot() {
     switchEditorView(els.language.value === "python" ? "python-template" : "template");
   });
   els.codeFileBtn.addEventListener("click", () => {
-    const alreadyHere = codeFileScope === "workspace" && editorView === "code";
-    if (alreadyHere) {
-      tempFilesExpanded = !tempFilesExpanded;
-      renderTempFiles();
-    } else {
-      tempFilesExpanded = true;
-      openProblemCode();
-    }
+    // Just toggle the file-name list (like a saved contest); opening files into
+    // the editor happens only when a specific file name is clicked.
+    tempFilesExpanded = !tempFilesExpanded;
+    renderTempFiles();
   });
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
@@ -272,17 +288,26 @@ function boot() {
       toggleThemeMenu(false);
     });
   });
+  els.contestSortBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleContestSortMenu();
+  });
+  els.contestSortItems.forEach((item) => {
+    item.addEventListener("click", () => setContestSortMode(item.dataset.sortValue));
+  });
   els.profileBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleProfileMenu();
   });
   els.topProfileHandleInput.addEventListener("input", () => {
     setCodeforcesHandle(els.topProfileHandleInput.value);
-    scheduleProfileLoad();
+    refreshProfileDisplay();
   });
+  els.profileReloadBtn.addEventListener("click", () => loadCodeforcesProfile({ force: true }));
   document.addEventListener("click", (event) => {
     if (!els.themeMenu.hidden && !els.themeDropdown.contains(event.target)) toggleThemeMenu(false);
     if (!els.profileMenu.hidden && !els.profileDropdown.contains(event.target)) toggleProfileMenu(false);
+    if (!els.contestSortMenu.hidden && !els.contestSortDropdown.contains(event.target)) toggleContestSortMenu(false);
   });
   els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
   els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
@@ -303,10 +328,16 @@ function boot() {
   els.contestUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") importContest();
   });
+  els.contestUrl.addEventListener("input", updateContestChip);
+  if (recentContest?.url) els.contestUrl.value = recentContest.url;
+  updateContestChip();
   els.codeLeftBtn.addEventListener("click", () => setCodeEditorPlacement("left"));
   els.codeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
   els.hideInputBtn.addEventListener("click", () => togglePanel("input"));
   els.hideOutputBtn.addEventListener("click", () => togglePanel("output"));
+  els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
+  els.copyOutputBtn.addEventListener("click", () => copyPaneText(els.output.value, els.copyOutputBtn));
+  els.copyCodeBtn.addEventListener("click", () => copyPaneText(getEditorCode(), els.copyCodeBtn));
   els.revealIoBtn.addEventListener("click", revealInputOutput);
   els.outputTabBtn.addEventListener("click", () => setOutputView("output"));
   els.debugToggle.addEventListener("click", () => setOutputView("debug"));
@@ -352,6 +383,7 @@ async function loadWorkspaceCppFiles() {
       cppFileNames = [];
       cppFiles = {};
     }
+    tempCppNames = cppFileNames.slice();
 
     cppInputs = Object.fromEntries(cppFileNames.map((name) => [name, ""]));
     cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
@@ -385,6 +417,7 @@ async function loadWorkspacePythonFiles() {
       pyFileNames = [];
       pyFiles = {};
     }
+    tempPyNames = pyFileNames.slice();
 
     pyInputs = Object.fromEntries(pyFileNames.map((name) => [name, ""]));
     pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
@@ -727,6 +760,20 @@ function toggleThemeMenu(force) {
   els.themeDropdownBtn.setAttribute("aria-expanded", String(open));
 }
 
+function toggleContestSortMenu(force) {
+  const open = typeof force === "boolean" ? force : els.contestSortMenu.hidden;
+  els.contestSortMenu.hidden = !open;
+  els.contestSortBtn.setAttribute("aria-expanded", String(open));
+}
+
+function setContestSortMode(mode) {
+  if (!contestSortModes.includes(mode)) return;
+  contestSortMode = mode;
+  localStorage.setItem("rathee.contestSortMode", mode);
+  toggleContestSortMenu(false);
+  renderSavedContests();
+}
+
 function toggleProfileMenu(force) {
   const open = typeof force === "boolean" ? force : els.profileMenu.hidden;
   els.profileMenu.hidden = !open;
@@ -734,7 +781,7 @@ function toggleProfileMenu(force) {
   if (open) {
     els.topProfileHandleInput.value = codeforcesHandle;
     updateProfileOpenLink();
-    loadCodeforcesProfile();
+    refreshProfileDisplay();
     requestAnimationFrame(() => els.topProfileHandleInput.focus());
   }
 }
@@ -745,66 +792,108 @@ function updateProfileOpenLink() {
   els.profileOpenLink.href = handle ? `https://codeforces.com/profile/${handle}` : "https://codeforces.com/";
 }
 
-let profileLoadTimer = null;
+let cachedProfile = readCachedProfile();
 
-function scheduleProfileLoad() {
-  clearTimeout(profileLoadTimer);
-  profileLoadTimer = setTimeout(loadCodeforcesProfile, 600);
+function readCachedProfile() {
+  try {
+    return JSON.parse(localStorage.getItem("rathee.cfProfile") || "null");
+  } catch {
+    return null;
+  }
 }
 
-async function loadCodeforcesProfile() {
+function cachedProfileMatchesHandle() {
+  return cachedProfile
+    && String(cachedProfile.handle || "").toLowerCase() === String(codeforcesHandle || "").toLowerCase();
+}
+
+// Render from the locally cached profile (no network). Used on boot, on open,
+// and while the handle is being edited — the API is only hit on first load or reload.
+function refreshProfileDisplay() {
+  renderProfile(cachedProfileMatchesHandle() ? cachedProfile : null);
+}
+
+async function loadCodeforcesProfile({ force = false } = {}) {
   const handle = codeforcesHandle;
   if (!handle) {
     renderProfile(null);
     return;
   }
+  if (!force && cachedProfileMatchesHandle()) {
+    renderProfile(cachedProfile);
+    return;
+  }
+  setReloadSpinning(true);
   setProfileMessage("Loading…");
   try {
     const res = await fetch(`/api/codeforces/profile?handle=${encodeURIComponent(handle)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not load profile.");
-    if (codeforcesHandle === handle) renderProfile(data);
+    if (codeforcesHandle !== handle) return; // handle changed mid-flight
+    cachedProfile = data;
+    localStorage.setItem("rathee.cfProfile", JSON.stringify(data));
+    renderProfile(data);
   } catch {
-    // Ignore stale responses if the handle changed while the request was in flight.
-    if (codeforcesHandle === handle) setProfileMessage("Rating unavailable");
+    if (codeforcesHandle !== handle) return;
+    if (cachedProfileMatchesHandle()) renderProfile(cachedProfile);
+    else setProfileMessage("Rating unavailable");
+  } finally {
+    setReloadSpinning(false);
   }
+}
+
+function setReloadSpinning(on) {
+  els.profileReloadBtn?.classList.toggle("spinning", on);
 }
 
 function setProfileMessage(message) {
-  if (!els.profileRating) return;
-  els.profileRating.hidden = false;
-  els.profileRank.textContent = message;
-  els.profileRank.classList.add("muted-rank");
-  els.profileRank.style.color = "";
-  els.profileRatingValue.hidden = true;
-  els.profileMaxRating.hidden = true;
-  setProfileIconColor(null);
+  if (els.profileRank) {
+    els.profileRank.textContent = message;
+    els.profileRank.classList.add("muted-rank");
+    els.profileRank.style.color = "";
+  }
+  if (els.profileRatingValue) els.profileRatingValue.hidden = true;
+  if (els.profileMaxRating) els.profileMaxRating.hidden = true;
 }
 
 function renderProfile(profile) {
-  if (!els.profileRating) return;
-  if (!profile) {
-    els.profileRating.hidden = true;
-    setProfileIconColor(null);
-    return;
-  }
-  els.profileRating.hidden = false;
-  const rated = Number.isFinite(profile.rating);
+  const rated = !!profile && Number.isFinite(profile.rating);
   const color = rated ? codeforcesRankColor(profile.rating) : null;
 
-  els.profileRank.classList.toggle("muted-rank", !rated);
-  els.profileRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
-  els.profileRank.style.color = color || "";
+  // Popover rating block (full detail, including max).
+  if (els.profileRank) {
+    if (!profile) {
+      els.profileRank.textContent = "—";
+      els.profileRank.classList.add("muted-rank");
+      els.profileRank.style.color = "";
+      els.profileRatingValue.hidden = true;
+      els.profileMaxRating.hidden = true;
+    } else {
+      els.profileRank.classList.toggle("muted-rank", !rated);
+      els.profileRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
+      els.profileRank.style.color = color || "";
+      els.profileRatingValue.hidden = !rated;
+      els.profileRatingValue.textContent = rated ? String(profile.rating) : "";
+      els.profileRatingValue.style.color = color || "";
+      const hasMax = Number.isFinite(profile.maxRating);
+      els.profileMaxRating.hidden = !hasMax;
+      els.profileMaxRating.textContent = hasMax
+        ? `max ${profile.maxRating}${profile.maxRank ? ` · ${titleCaseRank(profile.maxRank)}` : ""}`
+        : "";
+    }
+  }
 
-  els.profileRatingValue.hidden = !rated;
-  els.profileRatingValue.textContent = rated ? String(profile.rating) : "";
-  els.profileRatingValue.style.color = color || "";
-
-  const hasMax = Number.isFinite(profile.maxRating);
-  els.profileMaxRating.hidden = !hasMax;
-  els.profileMaxRating.textContent = hasMax
-    ? `max ${profile.maxRating}${profile.maxRank ? ` · ${titleCaseRank(profile.maxRank)}` : ""}`
-    : "";
+  // Topbar badge (rank over rating, no max).
+  if (els.profileBadge) {
+    const showBadge = rated || (profile && profile.rank);
+    els.profileBadge.hidden = !showBadge;
+    if (showBadge) {
+      els.profileBadgeRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
+      els.profileBadgeRating.hidden = !rated;
+      els.profileBadgeRating.textContent = rated ? String(profile.rating) : "";
+      els.profileBadge.style.color = color || "var(--muted)";
+    }
+  }
 
   setProfileIconColor(color);
 }
@@ -964,14 +1053,34 @@ async function loadSavedContestList() {
   }
 }
 
+function sortedSavedContests() {
+  const list = savedContests.slice();
+  const time = (value) => {
+    const ms = value ? Date.parse(value) : NaN;
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  if (contestSortMode === "fetched") {
+    return list.sort((a, b) => time(b.savedAt) - time(a.savedAt) || byName(a, b));
+  }
+  if (contestSortMode === "edited") {
+    return list.sort((a, b) =>
+      (time(b.lastModifiedAt) || time(b.savedAt)) - (time(a.lastModifiedAt) || time(a.savedAt)) || byName(a, b));
+  }
+  // "hosted": higher Codeforces contest id == more recently hosted
+  return list.sort((a, b) => (Number(b.contestId || 0) - Number(a.contestId || 0)) || byName(a, b));
+}
+
 function renderSavedContests() {
   els.savedContestList.innerHTML = "";
+  els.contestSortItems.forEach((item) =>
+    item.classList.toggle("active", item.dataset.sortValue === contestSortMode));
   if (!savedContests.length) {
     els.savedContestSection.hidden = true;
     return;
   }
   els.savedContestSection.hidden = false;
-  for (const contest of savedContests) {
+  for (const contest of sortedSavedContests()) {
     const contestKey = contestKeyFor(contest);
     const expanded = expandedContestKeys.has(contestKey);
     const group = document.createElement("div");
@@ -1048,6 +1157,7 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
   if (!contest?.contestDir && !contest?.contestId) return;
   if (contest.contestId) {
     els.contestUrl.value = `https://codeforces.com/contest/${contest.contestId}`;
+    updateContestChip();
   }
   saveCurrentState();
   setImportBusy(true);
@@ -1128,17 +1238,25 @@ function renderTempFiles() {
   els.tempFileList.innerHTML = "";
   if (!tempFilesExpanded) return;
 
+  // Always list the temporary workspace files from the cache, even when a
+  // contest is the active scope, so they stay accessible on the left. While in
+  // workspace scope the live arrays are the source of truth, so refresh the
+  // cache from them — this keeps the list in sync as files are added/removed.
   const inWorkspace = codeFileScope === "workspace";
-  const names = inWorkspace ? currentFileNames() : [];
+  if (inWorkspace) {
+    if (els.language.value === "python") tempPyNames = pyFileNames.slice();
+    else tempCppNames = cppFileNames.slice();
+  }
+  const names = els.language.value === "python" ? tempPyNames : tempCppNames;
   if (!names.length) {
     const empty = document.createElement("div");
     empty.className = "temp-file-empty";
-    empty.textContent = inWorkspace ? "No files yet" : "Open to view files";
+    empty.textContent = "No files yet";
     els.tempFileList.append(empty);
     return;
   }
 
-  const labels = currentTabLabels();
+  const labels = inWorkspace ? currentTabLabels() : {};
   const activeFile = currentActiveFile();
   for (const filename of names) {
     const btn = document.createElement("button");
@@ -1146,10 +1264,24 @@ function renderTempFiles() {
     btn.className = "contest-problem-btn temp-file-btn";
     btn.textContent = labels[filename] || filename;
     btn.title = btn.textContent;
-    btn.classList.toggle("active", editorView === "code" && filename === activeFile);
-    btn.addEventListener("click", () => switchCodeFile(filename));
+    btn.classList.toggle("active", inWorkspace && editorView === "code" && filename === activeFile);
+    btn.addEventListener("click", () => openTempFile(filename));
     els.tempFileList.append(btn);
   }
+}
+
+function openTempFile(filename) {
+  // Already in the workspace scope — just switch to the file.
+  if (codeFileScope === "workspace" && editorView === "code") {
+    switchCodeFile(filename);
+    return;
+  }
+  // Leaving a contest (or a template view): restore the workspace files, then
+  // activate the requested file once they have loaded.
+  saveCurrentState();
+  if (els.language.value === "python") activePyFile = filename;
+  else activeCppFile = filename;
+  openProblemCode();
 }
 
 function currentFileNames() {
@@ -1183,6 +1315,11 @@ function templateViewFilename(view = editorView) {
   return "";
 }
 
+function truncateTabLabel(text, max = 14) {
+  const value = String(text || "").replace(/\s+-\s+/g, "-");
+  return value.length > max ? `${value.slice(0, max).replace(/\s+$/, "")}..` : value;
+}
+
 function renderFileTabs() {
   els.fileTabs.innerHTML = "";
   renderTempFiles();
@@ -1206,10 +1343,11 @@ function renderFileTabs() {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "file-tab";
-    tab.title = tabLabels[filename] || filename;
+    const fullLabel = tabLabels[filename] || filename;
+    tab.title = fullLabel;
     tab.dataset.file = filename;
     const label = document.createElement("span");
-    label.textContent = tabLabels[filename] || filename;
+    label.textContent = truncateTabLabel(fullLabel);
     const close = document.createElement("span");
     close.className = "tab-close";
     close.textContent = "×";
@@ -1362,9 +1500,15 @@ function switchCodeFile(filename) {
 
 function updateActiveFileTab() {
   const activeFile = els.language.value === "python" ? activePyFile : activeCppFile;
+  let activeTab = null;
   els.fileTabs.querySelectorAll(".file-tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.file === activeFile);
+    const isActive = tab.dataset.file === activeFile;
+    tab.classList.toggle("active", isActive);
+    if (isActive) activeTab = tab;
   });
+  if (activeTab) {
+    requestAnimationFrame(() => activeTab.scrollIntoView({ inline: "nearest", block: "nearest" }));
+  }
 }
 
 function saveCurrentState(options = {}) {
@@ -1396,6 +1540,20 @@ function saveCurrentState(options = {}) {
     cppInputs[activeCppFile] = els.input.value;
     scheduleWorkspaceCodeSave();
   }
+}
+
+function parseContestNumber(value) {
+  const raw = String(value || "").trim();
+  const fromUrl = raw.match(/contests?\/(\d+)/i);
+  if (fromUrl) return fromUrl[1];
+  const bare = raw.match(/^(\d+)$/);
+  return bare ? bare[1] : "";
+}
+
+function updateContestChip() {
+  if (!els.contestNumberChip) return;
+  const number = parseContestNumber(els.contestUrl.value);
+  els.contestNumberChip.textContent = number || "—";
 }
 
 async function importContest() {
@@ -1658,6 +1816,18 @@ async function copyActiveCode() {
     await navigator.clipboard.writeText(getSubmitCode());
   } catch {
     els.debug.textContent = `${els.debug.textContent}\nClipboard permission was blocked. Select and copy the editor code manually.`;
+  }
+}
+
+async function copyPaneText(text, button) {
+  try {
+    await navigator.clipboard.writeText(text || "");
+    if (button) {
+      button.classList.add("copied");
+      setTimeout(() => button.classList.remove("copied"), 900);
+    }
+  } catch {
+    els.meta.textContent = "Clipboard permission was blocked.";
   }
 }
 
