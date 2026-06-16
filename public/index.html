@@ -49,6 +49,18 @@
             </button>
           </div>
           <div class="right-actions">
+            <div class="theme-dropdown">
+              <button id="themeDropdownBtn" class="icon-button theme-dropdown-button" title="Select theme" aria-haspopup="true" aria-expanded="false">
+                <span class="swatch-dot" aria-hidden="true"></span>
+              </button>
+              <div id="themeMenu" class="theme-menu" role="menu" hidden>
+                <button type="button" class="theme-menu-item" data-theme-value="aurora" role="menuitem"><span class="swatch-dot" aria-hidden="true"></span>Aurora</button>
+                <button type="button" class="theme-menu-item" data-theme-value="indigo" role="menuitem"><span class="swatch-dot" aria-hidden="true"></span>Indigo</button>
+                <button type="button" class="theme-menu-item" data-theme-value="sunset" role="menuitem"><span class="swatch-dot" aria-hidden="true"></span>Sunset</button>
+                <button type="button" class="theme-menu-item" data-theme-value="mono" role="menuitem"><span class="swatch-dot" aria-hidden="true"></span>Mono</button>
+              </div>
+            </div>
+            <button id="modeToggleBtn" class="icon-button mode-toggle-button" title="Toggle light/dark mode"><span class="mode-icon" aria-hidden="true">☾</span></button>
             <button id="settingsBtn" class="icon-button settings-button" title="Settings"><span class="settings-icon">⚙</span></button>
             <a class="cf-home-button" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer" title="Open Codeforces">CF</a>
             <label class="contest-wrap" title="Codeforces contest URL">
@@ -57,6 +69,28 @@
               <button id="importContestBtn" class="icon-button import-button" title="Import contest">↓</button>
             </label>
             <button id="cfStatusBtn">Status</button>
+            <div class="profile-dropdown">
+              <button id="profileBtn" class="icon-button profile-button" type="button" aria-haspopup="true" aria-expanded="false" title="Codeforces profile" aria-label="Codeforces profile">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <circle cx="12" cy="8.2" r="3.4" />
+                  <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+                </svg>
+              </button>
+              <div id="profileMenu" class="profile-menu" hidden>
+                <label class="profile-menu-field">
+                  <span>Codeforces handle</span>
+                  <input id="topProfileHandleInput" type="text" placeholder="tourist or profile URL" autocomplete="off" spellcheck="false" />
+                </label>
+                <div id="profileRating" class="profile-rating" hidden>
+                  <div class="profile-rating-main">
+                    <span id="profileRank" class="profile-rank"></span>
+                    <span id="profileRatingValue" class="profile-rating-value"></span>
+                  </div>
+                  <div id="profileMaxRating" class="profile-max"></div>
+                </div>
+                <a id="profileOpenLink" class="profile-open-link" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer">Open profile ↗</a>
+              </div>
+            </div>
           </div>
         </div>
       </header>

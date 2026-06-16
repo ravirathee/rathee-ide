@@ -37,6 +37,21 @@ const els = {
   modeLightBtn: document.querySelector("#modeLightBtn"),
   modeDarkBtn: document.querySelector("#modeDarkBtn"),
   themeSwatches: Array.from(document.querySelectorAll(".theme-swatch")),
+  modeToggleBtn: document.querySelector("#modeToggleBtn"),
+  modeIcon: document.querySelector("#modeToggleBtn .mode-icon"),
+  themeDropdown: document.querySelector(".theme-dropdown"),
+  themeDropdownBtn: document.querySelector("#themeDropdownBtn"),
+  themeMenu: document.querySelector("#themeMenu"),
+  themeMenuItems: Array.from(document.querySelectorAll(".theme-menu-item")),
+  profileDropdown: document.querySelector(".profile-dropdown"),
+  profileBtn: document.querySelector("#profileBtn"),
+  profileMenu: document.querySelector("#profileMenu"),
+  topProfileHandleInput: document.querySelector("#topProfileHandleInput"),
+  profileOpenLink: document.querySelector("#profileOpenLink"),
+  profileRating: document.querySelector("#profileRating"),
+  profileRank: document.querySelector("#profileRank"),
+  profileRatingValue: document.querySelector("#profileRatingValue"),
+  profileMaxRating: document.querySelector("#profileMaxRating"),
   openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
   openHeadersFileBtn: document.querySelector("#openHeadersFileBtn"),
   openPythonTemplateFileBtn: document.querySelector("#openPythonTemplateFileBtn"),
@@ -244,6 +259,31 @@ function boot() {
   els.themeSwatches.forEach((swatch) => {
     swatch.addEventListener("click", () => setAppearanceTheme(swatch.dataset.themeValue));
   });
+  els.modeToggleBtn.addEventListener("click", () => {
+    setAppearanceMode(appearanceMode === "dark" ? "light" : "dark");
+  });
+  els.themeDropdownBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleThemeMenu();
+  });
+  els.themeMenuItems.forEach((item) => {
+    item.addEventListener("click", () => {
+      setAppearanceTheme(item.dataset.themeValue);
+      toggleThemeMenu(false);
+    });
+  });
+  els.profileBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleProfileMenu();
+  });
+  els.topProfileHandleInput.addEventListener("input", () => {
+    setCodeforcesHandle(els.topProfileHandleInput.value);
+    scheduleProfileLoad();
+  });
+  document.addEventListener("click", (event) => {
+    if (!els.themeMenu.hidden && !els.themeDropdown.contains(event.target)) toggleThemeMenu(false);
+    if (!els.profileMenu.hidden && !els.profileDropdown.contains(event.target)) toggleProfileMenu(false);
+  });
   els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
   els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
   els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
@@ -276,6 +316,7 @@ function boot() {
   setEditorFontFamily(editorFontFamily);
   els.quickLanguage.value = els.language.value;
   setCodeforcesHandle(codeforcesHandle);
+  loadCodeforcesProfile();
   codeEditor?.on("change", handleEditorChange);
   updateEditorActionButton();
   updateEditorEmptyState();
@@ -670,7 +711,121 @@ function applyAppearance() {
   els.themeSwatches.forEach((swatch) => {
     swatch.classList.toggle("active", swatch.dataset.themeValue === appearanceTheme);
   });
+  if (els.modeIcon) els.modeIcon.textContent = appearanceMode === "dark" ? "☾" : "☀";
+  if (els.modeToggleBtn) {
+    els.modeToggleBtn.title = appearanceMode === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  }
+  els.themeMenuItems?.forEach((item) => {
+    item.classList.toggle("active", item.dataset.themeValue === appearanceTheme);
+  });
   requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function toggleThemeMenu(force) {
+  const open = typeof force === "boolean" ? force : els.themeMenu.hidden;
+  els.themeMenu.hidden = !open;
+  els.themeDropdownBtn.setAttribute("aria-expanded", String(open));
+}
+
+function toggleProfileMenu(force) {
+  const open = typeof force === "boolean" ? force : els.profileMenu.hidden;
+  els.profileMenu.hidden = !open;
+  els.profileBtn.setAttribute("aria-expanded", String(open));
+  if (open) {
+    els.topProfileHandleInput.value = codeforcesHandle;
+    updateProfileOpenLink();
+    loadCodeforcesProfile();
+    requestAnimationFrame(() => els.topProfileHandleInput.focus());
+  }
+}
+
+function updateProfileOpenLink() {
+  if (!els.profileOpenLink) return;
+  const handle = encodeURIComponent(codeforcesHandle || "");
+  els.profileOpenLink.href = handle ? `https://codeforces.com/profile/${handle}` : "https://codeforces.com/";
+}
+
+let profileLoadTimer = null;
+
+function scheduleProfileLoad() {
+  clearTimeout(profileLoadTimer);
+  profileLoadTimer = setTimeout(loadCodeforcesProfile, 600);
+}
+
+async function loadCodeforcesProfile() {
+  const handle = codeforcesHandle;
+  if (!handle) {
+    renderProfile(null);
+    return;
+  }
+  setProfileMessage("Loading…");
+  try {
+    const res = await fetch(`/api/codeforces/profile?handle=${encodeURIComponent(handle)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load profile.");
+    if (codeforcesHandle === handle) renderProfile(data);
+  } catch {
+    // Ignore stale responses if the handle changed while the request was in flight.
+    if (codeforcesHandle === handle) setProfileMessage("Rating unavailable");
+  }
+}
+
+function setProfileMessage(message) {
+  if (!els.profileRating) return;
+  els.profileRating.hidden = false;
+  els.profileRank.textContent = message;
+  els.profileRank.classList.add("muted-rank");
+  els.profileRank.style.color = "";
+  els.profileRatingValue.hidden = true;
+  els.profileMaxRating.hidden = true;
+  setProfileIconColor(null);
+}
+
+function renderProfile(profile) {
+  if (!els.profileRating) return;
+  if (!profile) {
+    els.profileRating.hidden = true;
+    setProfileIconColor(null);
+    return;
+  }
+  els.profileRating.hidden = false;
+  const rated = Number.isFinite(profile.rating);
+  const color = rated ? codeforcesRankColor(profile.rating) : null;
+
+  els.profileRank.classList.toggle("muted-rank", !rated);
+  els.profileRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
+  els.profileRank.style.color = color || "";
+
+  els.profileRatingValue.hidden = !rated;
+  els.profileRatingValue.textContent = rated ? String(profile.rating) : "";
+  els.profileRatingValue.style.color = color || "";
+
+  const hasMax = Number.isFinite(profile.maxRating);
+  els.profileMaxRating.hidden = !hasMax;
+  els.profileMaxRating.textContent = hasMax
+    ? `max ${profile.maxRating}${profile.maxRank ? ` · ${titleCaseRank(profile.maxRank)}` : ""}`
+    : "";
+
+  setProfileIconColor(color);
+}
+
+function setProfileIconColor(color) {
+  if (els.profileBtn) els.profileBtn.style.color = color || "";
+}
+
+function titleCaseRank(rank) {
+  return String(rank || "").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function codeforcesRankColor(rating) {
+  if (!Number.isFinite(rating)) return null;
+  if (rating < 1200) return "#9aa6b6"; // newbie (gray, lifted for dark bg)
+  if (rating < 1400) return "#3bab5a"; // pupil (green)
+  if (rating < 1600) return "#16baa9"; // specialist (cyan)
+  if (rating < 1900) return "#5d8bf0"; // expert (blue, lifted for contrast)
+  if (rating < 2100) return "#c156d4"; // candidate master (violet)
+  if (rating < 2400) return "#f1a02e"; // master / international master (orange)
+  return "#fa4d4d"; // grandmaster and above (red)
 }
 
 function setAppearanceMode(mode) {
@@ -1435,7 +1590,13 @@ function setEditorFontFamily(fontFamily) {
 
 function setCodeforcesHandle(handle) {
   codeforcesHandle = normalizeCodeforcesHandle(handle);
-  els.codeforcesHandleInput.value = codeforcesHandle;
+  if (els.codeforcesHandleInput && els.codeforcesHandleInput.value !== codeforcesHandle) {
+    els.codeforcesHandleInput.value = codeforcesHandle;
+  }
+  if (els.topProfileHandleInput && els.topProfileHandleInput.value !== codeforcesHandle) {
+    els.topProfileHandleInput.value = codeforcesHandle;
+  }
+  updateProfileOpenLink();
   localStorage.setItem("rathee.codeforcesHandle", codeforcesHandle);
   scheduleAppSettingsSave();
 }

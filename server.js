@@ -1,4 +1,5 @@
 import http from "node:http";
+import https from "node:https";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile, stat, rm, readdir, rename } from "node:fs/promises";
 import { createReadStream } from "node:fs";
@@ -175,6 +176,12 @@ const server = http.createServer(async (req, res) => {
       const contestId = url.searchParams.get("contestId") || "";
       const index = url.searchParams.get("index") || "";
       const result = await fetchCodeforcesStatus({ handle, contestId, index });
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/codeforces/profile") {
+      const handle = url.searchParams.get("handle") || "";
+      const result = await fetchCodeforcesProfile({ handle });
       return sendJson(res, 200, result);
     }
 
@@ -431,6 +438,65 @@ async function fetchCodeforcesStatus({ handle, contestId, index }) {
     }));
 
   return { handle, contestId, index, submissions, latest: submissions[0] || null };
+}
+
+function httpsGetJson(url, { headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        let data = null;
+        try { data = JSON.parse(body); } catch { /* leave data null on non-JSON */ }
+        resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data });
+      });
+    });
+    request.on("error", reject);
+    request.setTimeout(10000, () => request.destroy(new Error("Codeforces request timed out.")));
+  });
+}
+
+const profileCache = new Map();
+const profileCacheTtlMs = 5 * 60 * 1000;
+
+async function fetchCodeforcesProfile({ handle }) {
+  if (!/^[A-Za-z0-9_.-]{3,24}$/.test(handle)) {
+    throw new Error("Invalid Codeforces handle.");
+  }
+
+  const key = handle.toLowerCase();
+  const cached = profileCache.get(key);
+  if (cached && cached.expires > Date.now()) {
+    return cached.data;
+  }
+
+  const apiUrl = new URL("https://codeforces.com/api/user.info");
+  apiUrl.searchParams.set("handles", handle);
+
+  const { ok, status, data } = await httpsGetJson(apiUrl, {
+    headers: {
+      "User-Agent": "Forge-IDE/1.0"
+    }
+  });
+
+  if (!ok || data?.status !== "OK" || !Array.isArray(data.result) || !data.result.length) {
+    const message = data?.comment || `Codeforces profile request failed with ${status}.`;
+    throw new Error(message);
+  }
+
+  const user = data.result[0];
+  const profile = {
+    handle: user.handle || handle,
+    rating: Number.isFinite(user.rating) ? user.rating : null,
+    maxRating: Number.isFinite(user.maxRating) ? user.maxRating : null,
+    rank: user.rank || null,
+    maxRank: user.maxRank || null,
+    titlePhoto: user.titlePhoto || null
+  };
+
+  profileCache.set(key, { data: profile, expires: Date.now() + profileCacheTtlMs });
+  return profile;
 }
 
 async function materializeContestFiles(contest, { language, templates }) {
