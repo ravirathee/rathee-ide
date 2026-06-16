@@ -4,8 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rathee IDE</title>
+    <script>
+      // Apply saved appearance before first paint to avoid a flash of the wrong theme.
+      (function () {
+        var root = document.documentElement;
+        try {
+          var mode = localStorage.getItem("rathee.appearanceMode");
+          var theme = localStorage.getItem("rathee.appearanceTheme");
+          root.dataset.mode = mode === "light" || mode === "dark" ? mode : "dark";
+          root.dataset.theme = ["aurora", "indigo", "sunset", "mono"].indexOf(theme) >= 0 ? theme : "aurora";
+        } catch (e) {
+          root.dataset.mode = "dark";
+          root.dataset.theme = "aurora";
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/neo.min.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -48,14 +64,29 @@
       <section class="workspace">
         <aside id="sideDrawer" class="side-drawer">
           <div class="drawer-rail">
-            <button id="menuBtn" class="icon-button menu-button" title="Open files" aria-label="Open files">&gt;</button>
+            <button id="menuBtn" class="menu-button" title="Open files" aria-label="Open files">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M9 6 L15 12 L9 18" />
+              </svg>
+            </button>
           </div>
           <div class="drawer-panel">
             <div class="drawer-head">
               <span>Files</span>
-              <button id="drawerCloseBtn" class="drawer-close-button" title="Close drawer" aria-label="Close drawer">&lt;</button>
+              <div class="drawer-head-actions">
+                <button id="drawerTemplatesBtn" class="drawer-templates-button" type="button" title="Open template files">Templates</button>
+                <button id="drawerCloseBtn" class="drawer-close-button" title="Close drawer" aria-label="Close drawer">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <path d="M14 6 L8 12 L14 18" />
+                  </svg>
+                </button>
+              </div>
             </div>
-            <button id="codeFileBtn" class="drawer-item active">Temporary Code Files</button>
+            <button id="codeFileBtn" class="drawer-item saved-contest-btn contest-toggle-btn code-file-btn active" type="button" aria-expanded="true">
+              <span class="contest-chevron">&gt;</span>
+              <span class="contest-title">Temporary Code Files</span>
+            </button>
+            <div id="tempFileList" class="contest-problem-list temp-file-list"></div>
             <div id="savedContestSection" class="saved-contests" hidden>
               <div class="drawer-label">Saved Contests</div>
               <div id="savedContestList" class="saved-contest-list"></div>
@@ -74,36 +105,38 @@
             </div>
           </div>
           <div id="editorQuickSettings" class="editor-quick-settings" hidden>
-            <div class="quick-setting quick-font-size-setting">
-              <span>Font size</span>
-              <div class="quick-stepper" role="group" aria-label="Editor font size">
-                <button id="quickFontDownBtn" type="button" aria-label="Decrease editor font size">-</button>
-                <strong id="quickFontSizeLabel">15px</strong>
-                <button id="quickFontUpBtn" type="button" aria-label="Increase editor font size">+</button>
+            <div class="quick-settings-group">
+              <div class="quick-setting quick-font-size-setting">
+                <span>Font size</span>
+                <div class="quick-stepper" role="group" aria-label="Editor font size">
+                  <button id="quickFontDownBtn" type="button" aria-label="Decrease editor font size">-</button>
+                  <strong id="quickFontSizeLabel">15px</strong>
+                  <button id="quickFontUpBtn" type="button" aria-label="Increase editor font size">+</button>
+                </div>
               </div>
-            </div>
-            <label class="quick-setting">
-              <span>Font</span>
-              <select id="quickEditorFontSelect">
-                <option value="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace">System Mono</option>
-                <option value="Menlo, Monaco, Consolas, Liberation Mono, monospace">Menlo</option>
-                <option value="Consolas, Liberation Mono, Menlo, monospace">Consolas</option>
-                <option value="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace">JetBrains Mono</option>
-                <option value="Fira Code, ui-monospace, SFMono-Regular, Menlo, monospace">Fira Code</option>
-              </select>
-            </label>
-            <label class="quick-setting quick-language-setting">
-              <span>Language</span>
-              <select id="quickLanguage">
-                <option value="python">Python 3</option>
-                <option value="cpp">C++17</option>
-              </select>
-            </label>
-            <div class="quick-setting quick-segment-setting">
-              <span>Placement</span>
-              <div class="quick-segments" role="group" aria-label="Code editor placement">
-                <button id="quickCodeLeftBtn" type="button">Left</button>
-                <button id="quickCodeRightBtn" type="button">Right</button>
+              <label class="quick-setting">
+                <span>Font</span>
+                <select id="quickEditorFontSelect">
+                  <option value="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace">System Mono</option>
+                  <option value="Menlo, Monaco, Consolas, Liberation Mono, monospace">Menlo</option>
+                  <option value="Consolas, Liberation Mono, Menlo, monospace">Consolas</option>
+                  <option value="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace">JetBrains Mono</option>
+                  <option value="Fira Code, ui-monospace, SFMono-Regular, Menlo, monospace">Fira Code</option>
+                </select>
+              </label>
+              <label class="quick-setting quick-language-setting">
+                <span>Language</span>
+                <select id="quickLanguage">
+                  <option value="python">Python 3</option>
+                  <option value="cpp">C++17</option>
+                </select>
+              </label>
+              <div class="quick-setting quick-segment-setting">
+                <span>Placement</span>
+                <div class="quick-segments" role="group" aria-label="Code editor placement">
+                  <button id="quickCodeLeftBtn" type="button">Left</button>
+                  <button id="quickCodeRightBtn" type="button">Right</button>
+                </div>
               </div>
             </div>
             <button id="resetCodeBtn" class="quick-action-button" type="button">Load from Template</button>
@@ -121,7 +154,11 @@
           <div class="io-section input-section">
             <div class="pane-head">
               <span>input.txt</span>
-              <button id="hideInputBtn" class="pane-collapse-button input-collapse-button" title="Hide input panel" aria-label="Hide input panel">&gt;</button>
+              <button id="hideInputBtn" class="pane-collapse-button input-collapse-button" title="Hide input panel" aria-label="Hide input panel">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M9 6 L15 12 L9 18" />
+                </svg>
+              </button>
             </div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
@@ -132,7 +169,11 @@
                 <button id="outputTabBtn" class="pane-tab active">output.txt</button>
                 <button id="debugToggle" class="pane-tab" title="Show debugger diagnostics">Debugger</button>
               </div>
-              <button id="hideOutputBtn" class="pane-collapse-button output-collapse-button" title="Hide output panel" aria-label="Hide output panel">&gt;</button>
+              <button id="hideOutputBtn" class="pane-collapse-button output-collapse-button" title="Hide output panel" aria-label="Hide output panel">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M9 6 L15 12 L9 18" />
+                </svg>
+              </button>
             </div>
             <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
             <pre id="debug" class="debug-panel inline-debug" hidden aria-label="Debug output"></pre>
@@ -150,10 +191,37 @@
           </div>
           <aside class="settings-nav">
             <button class="settings-tab active" data-settings-tab="profile">Profile</button>
+            <button class="settings-tab" data-settings-tab="appearance">Appearance</button>
             <button class="settings-tab" data-settings-tab="editor">Code Editor</button>
             <button class="settings-tab" data-settings-tab="templates">Template Files</button>
           </aside>
           <div class="settings-panel">
+            <div id="appearanceSettings" class="settings-content" hidden>
+              <label class="setting-row">
+                <span>Mode</span>
+                <div class="segmented-control" role="group" aria-label="Color mode">
+                  <button id="modeLightBtn" type="button" class="segment">☀ Light</button>
+                  <button id="modeDarkBtn" type="button" class="segment">☾ Dark</button>
+                </div>
+              </label>
+              <div class="setting-row setting-row--stack">
+                <span>Theme</span>
+                <div id="themeGrid" class="theme-grid" role="group" aria-label="Accent theme">
+                  <button type="button" class="theme-swatch" data-theme-value="aurora">
+                    <span class="swatch-dot" aria-hidden="true"></span><span>Aurora</span>
+                  </button>
+                  <button type="button" class="theme-swatch" data-theme-value="indigo">
+                    <span class="swatch-dot" aria-hidden="true"></span><span>Indigo</span>
+                  </button>
+                  <button type="button" class="theme-swatch" data-theme-value="sunset">
+                    <span class="swatch-dot" aria-hidden="true"></span><span>Sunset</span>
+                  </button>
+                  <button type="button" class="theme-swatch" data-theme-value="mono">
+                    <span class="swatch-dot" aria-hidden="true"></span><span>Mono</span>
+                  </button>
+                </div>
+              </div>
+            </div>
             <div id="profileSettings" class="settings-content">
               <label class="setting-row">
                 <span>Codeforces handle or profile URL</span>

@@ -3,7 +3,9 @@ const els = {
   menuBtn: document.querySelector("#menuBtn"),
   sideDrawer: document.querySelector("#sideDrawer"),
   drawerCloseBtn: document.querySelector("#drawerCloseBtn"),
+  drawerTemplatesBtn: document.querySelector("#drawerTemplatesBtn"),
   codeFileBtn: document.querySelector("#codeFileBtn"),
+  tempFileList: document.querySelector("#tempFileList"),
   savedContestSection: document.querySelector("#savedContestSection"),
   savedContestList: document.querySelector("#savedContestList"),
   language: document.querySelector("#language"),
@@ -31,6 +33,10 @@ const els = {
   editorSettings: document.querySelector("#editorSettings"),
   profileSettings: document.querySelector("#profileSettings"),
   templateSettings: document.querySelector("#templateSettings"),
+  appearanceSettings: document.querySelector("#appearanceSettings"),
+  modeLightBtn: document.querySelector("#modeLightBtn"),
+  modeDarkBtn: document.querySelector("#modeDarkBtn"),
+  themeSwatches: Array.from(document.querySelectorAll(".theme-swatch")),
   openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
   openHeadersFileBtn: document.querySelector("#openHeadersFileBtn"),
   openPythonTemplateFileBtn: document.querySelector("#openPythonTemplateFileBtn"),
@@ -88,10 +94,19 @@ let templateDirty = false;
 let recentContest = JSON.parse(localStorage.getItem("rathee.recentContest") || "null");
 let savedContests = [];
 let expandedContestKeys = new Set();
+let tempFilesExpanded = true;
 let codeforcesHandle = localStorage.getItem("rathee.codeforcesHandle") || "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
 let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
   || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
+const APPEARANCE_MODES = ["light", "dark"];
+const APPEARANCE_THEMES = ["aurora", "indigo", "sunset", "mono"];
+let appearanceMode = APPEARANCE_MODES.includes(localStorage.getItem("rathee.appearanceMode"))
+  ? localStorage.getItem("rathee.appearanceMode")
+  : "dark";
+let appearanceTheme = APPEARANCE_THEMES.includes(localStorage.getItem("rathee.appearanceTheme"))
+  ? localStorage.getItem("rathee.appearanceTheme")
+  : "aurora";
 let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
@@ -131,6 +146,10 @@ function applyAppSettings(settings) {
     currentLanguage = settings.language;
   }
 
+  const appearance = settings.appearance || {};
+  if (APPEARANCE_MODES.includes(appearance.mode)) appearanceMode = appearance.mode;
+  if (APPEARANCE_THEMES.includes(appearance.theme)) appearanceTheme = appearance.theme;
+
   const layout = settings.layout || {};
   if (Number.isFinite(Number(layout.drawerWidth))) layoutState.drawerWidth = Number(layout.drawerWidth);
   if (["left", "right"].includes(layout.codeSide)) layoutState.codeSide = layout.codeSide;
@@ -147,6 +166,10 @@ function currentAppSettings() {
     editorFontSize,
     editorFontFamily,
     language: els.language.value,
+    appearance: {
+      mode: appearanceMode,
+      theme: appearanceTheme
+    },
     layout: {
       drawerWidth: layoutState.drawerWidth,
       codeSide: layoutState.codeSide,
@@ -174,6 +197,7 @@ function scheduleAppSettingsSave() {
 function boot() {
   renderFileTabs();
   initCodeEditor();
+  applyAppearance();
   activeCppFile = "";
   cppFileNames = [];
   cppFiles = {};
@@ -187,7 +211,19 @@ function boot() {
   els.debugBtn?.addEventListener("click", () => submit("debug"));
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
-  els.codeFileBtn.addEventListener("click", openProblemCode);
+  els.drawerTemplatesBtn.addEventListener("click", () => {
+    switchEditorView(els.language.value === "python" ? "python-template" : "template");
+  });
+  els.codeFileBtn.addEventListener("click", () => {
+    const alreadyHere = codeFileScope === "workspace" && editorView === "code";
+    if (alreadyHere) {
+      tempFilesExpanded = !tempFilesExpanded;
+      renderTempFiles();
+    } else {
+      tempFilesExpanded = true;
+      openProblemCode();
+    }
+  });
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
   els.openPythonTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("python-template"));
@@ -202,6 +238,11 @@ function boot() {
   });
   els.settingsTabs.forEach((tab) => {
     tab.addEventListener("click", () => switchSettingsTab(tab.dataset.settingsTab));
+  });
+  els.modeLightBtn.addEventListener("click", () => setAppearanceMode("light"));
+  els.modeDarkBtn.addEventListener("click", () => setAppearanceMode("dark"));
+  els.themeSwatches.forEach((swatch) => {
+    swatch.addEventListener("click", () => setAppearanceTheme(swatch.dataset.themeValue));
   });
   els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
   els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
@@ -606,13 +647,44 @@ function openTemplateSettingsFile(view) {
 }
 
 function switchSettingsTab(tabName) {
-  const target = ["profile", "editor", "templates"].includes(tabName) ? tabName : "profile";
+  const target = ["profile", "appearance", "editor", "templates"].includes(tabName) ? tabName : "profile";
   els.settingsTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.settingsTab === target);
   });
+  els.appearanceSettings.hidden = target !== "appearance";
   els.editorSettings.hidden = target !== "editor";
   els.profileSettings.hidden = target !== "profile";
   els.templateSettings.hidden = target !== "templates";
+}
+
+function applyAppearance() {
+  if (!APPEARANCE_MODES.includes(appearanceMode)) appearanceMode = "dark";
+  if (!APPEARANCE_THEMES.includes(appearanceTheme)) appearanceTheme = "aurora";
+  document.documentElement.dataset.mode = appearanceMode;
+  document.documentElement.dataset.theme = appearanceTheme;
+  localStorage.setItem("rathee.appearanceMode", appearanceMode);
+  localStorage.setItem("rathee.appearanceTheme", appearanceTheme);
+  codeEditor?.setOption("theme", appearanceMode === "light" ? "neo" : "material-darker");
+  els.modeLightBtn?.classList.toggle("active", appearanceMode === "light");
+  els.modeDarkBtn?.classList.toggle("active", appearanceMode === "dark");
+  els.themeSwatches.forEach((swatch) => {
+    swatch.classList.toggle("active", swatch.dataset.themeValue === appearanceTheme);
+  });
+  requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function setAppearanceMode(mode) {
+  if (!APPEARANCE_MODES.includes(mode) || mode === appearanceMode) return;
+  appearanceMode = mode;
+  applyAppearance();
+  scheduleAppSettingsSave();
+}
+
+function setAppearanceTheme(theme) {
+  if (!APPEARANCE_THEMES.includes(theme) || theme === appearanceTheme) return;
+  appearanceTheme = theme;
+  applyAppearance();
+  scheduleAppSettingsSave();
 }
 
 function setCodeEditorPlacement(side) {
@@ -890,7 +962,39 @@ function getCurrentEditorBuffer() {
 }
 
 function updateDrawerActiveItem() {
-  els.codeFileBtn.classList.toggle("active", editorView === "code");
+  els.codeFileBtn.classList.toggle("active", editorView === "code" && codeFileScope === "workspace");
+  renderTempFiles();
+}
+
+function renderTempFiles() {
+  if (!els.tempFileList) return;
+  els.codeFileBtn.setAttribute("aria-expanded", String(tempFilesExpanded));
+  els.tempFileList.hidden = !tempFilesExpanded;
+  els.tempFileList.innerHTML = "";
+  if (!tempFilesExpanded) return;
+
+  const inWorkspace = codeFileScope === "workspace";
+  const names = inWorkspace ? currentFileNames() : [];
+  if (!names.length) {
+    const empty = document.createElement("div");
+    empty.className = "temp-file-empty";
+    empty.textContent = inWorkspace ? "No files yet" : "Open to view files";
+    els.tempFileList.append(empty);
+    return;
+  }
+
+  const labels = currentTabLabels();
+  const activeFile = currentActiveFile();
+  for (const filename of names) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "contest-problem-btn temp-file-btn";
+    btn.textContent = labels[filename] || filename;
+    btn.title = btn.textContent;
+    btn.classList.toggle("active", editorView === "code" && filename === activeFile);
+    btn.addEventListener("click", () => switchCodeFile(filename));
+    els.tempFileList.append(btn);
+  }
 }
 
 function currentFileNames() {
@@ -926,6 +1030,7 @@ function templateViewFilename(view = editorView) {
 
 function renderFileTabs() {
   els.fileTabs.innerHTML = "";
+  renderTempFiles();
   if (isTemplateEditorView()) {
     for (const view of ["template", "headers", "python-template"]) {
       const tab = document.createElement("button");
@@ -1295,7 +1400,7 @@ function handleEditorAction() {
 function updateEditorActionButton() {
   if (isTemplateEditorView()) {
     const filename = templateViewFilename();
-    els.resetCodeBtn.textContent = "Reload File";
+    els.resetCodeBtn.textContent = "Load from Template";
     els.resetCodeBtn.title = `Reload ${filename} from workspace`;
   } else {
     els.resetCodeBtn.textContent = "Load from Template";
