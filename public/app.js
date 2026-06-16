@@ -57,11 +57,13 @@ const els = {
   topProfileHandleInput: document.querySelector("#topProfileHandleInput"),
   profileOpenLink: document.querySelector("#profileOpenLink"),
   profileRating: document.querySelector("#profileRating"),
-  profileRank: document.querySelector("#profileRank"),
-  profileRatingValue: document.querySelector("#profileRatingValue"),
-  profileMaxRating: document.querySelector("#profileMaxRating"),
+  profileStats: document.querySelector("#profileStats"),
+  profileSolved: document.querySelector("#profileSolved"),
+  profileContests: document.querySelector("#profileContests"),
+  profileHeatmap: document.querySelector("#profileHeatmap"),
   profileReloadBtn: document.querySelector("#profileReloadBtn"),
   profileBadge: document.querySelector("#profileBadge"),
+  profileBadgeEmoji: document.querySelector("#profileBadgeEmoji"),
   profileBadgeRank: document.querySelector("#profileBadgeRank"),
   profileBadgeRating: document.querySelector("#profileBadgeRating"),
   openTemplateFileBtn: document.querySelector("#openTemplateFileBtn"),
@@ -847,47 +849,109 @@ function setReloadSpinning(on) {
 }
 
 function setProfileMessage(message) {
-  if (els.profileRank) {
-    els.profileRank.textContent = message;
-    els.profileRank.classList.add("muted-rank");
-    els.profileRank.style.color = "";
+  if (els.profileRating) {
+    els.profileRating.innerHTML = "";
+    els.profileRating.textContent = message;
   }
-  if (els.profileRatingValue) els.profileRatingValue.hidden = true;
-  if (els.profileMaxRating) els.profileMaxRating.hidden = true;
+}
+
+// Codeforces rank ladder (low → high) with a fun emoji and the real CF color.
+const CF_RANKS = [
+  { name: "Newbie", emoji: "🐣", min: 0, color: "#9aa6b6" },
+  { name: "Pupil", emoji: "🌱", min: 1200, color: "#3bab5a" },
+  { name: "Specialist", emoji: "🛠️", min: 1400, color: "#16baa9" },
+  { name: "Expert", emoji: "🎖️", min: 1600, color: "#5d8bf0" },
+  { name: "Candidate Master", emoji: "🥋", min: 1900, color: "#c156d4" },
+  { name: "Master", emoji: "🥷", min: 2100, color: "#f1a02e" },
+  { name: "International Master", emoji: "🌐", min: 2300, color: "#f1a02e" },
+  { name: "Grandmaster", emoji: "⚔️", min: 2400, color: "#fa4d4d" },
+  { name: "International Grandmaster", emoji: "🔥", min: 2600, color: "#fa4d4d" },
+  { name: "Legendary Grandmaster", emoji: "👑", min: 2900, color: "#fa4d4d" }
+];
+
+function rankIndexForRating(rating) {
+  if (!Number.isFinite(rating)) return -1;
+  let index = 0;
+  for (let i = 0; i < CF_RANKS.length; i++) {
+    if (rating >= CF_RANKS[i].min) index = i;
+  }
+  return index;
+}
+
+// Render the full rank ladder, highlighting the user's current rank.
+function renderRankLadder(profile) {
+  const container = els.profileRating;
+  if (!container) return;
+  container.innerHTML = "";
+  if (!profile) {
+    container.textContent = "—";
+    return;
+  }
+  const rating = Number.isFinite(profile.rating) ? profile.rating : null;
+  const maxRating = Number.isFinite(profile.maxRating) ? profile.maxRating : null;
+  const currentIdx = rankIndexForRating(rating);
+  const maxIdx = rankIndexForRating(maxRating);
+
+  if (rating === null) {
+    const note = document.createElement("div");
+    note.className = "rank-ladder-note";
+    note.textContent = "Unrated yet — climb the ladder! 🧗";
+    container.append(note);
+  }
+
+  const ladder = document.createElement("div");
+  ladder.className = "rank-ladder";
+  let currentRow = null;
+  for (let i = 0; i < CF_RANKS.length; i++) {
+    const rank = CF_RANKS[i];
+    const row = document.createElement("div");
+    row.className = "rank-row";
+    row.style.setProperty("--rank-color", rank.color);
+    const isCurrent = i === currentIdx;
+    if (isCurrent) { row.classList.add("current"); currentRow = row; }
+    if (currentIdx !== -1 && i > currentIdx) row.classList.add("locked");
+
+    const emoji = document.createElement("span");
+    emoji.className = "rank-emoji";
+    emoji.textContent = rank.emoji;
+
+    const name = document.createElement("span");
+    name.className = "rank-name";
+    name.textContent = rank.name;
+
+    const tag = document.createElement("span");
+    tag.className = "rank-tag";
+    if (isCurrent) {
+      tag.textContent = rating !== null ? `${rating} · you are here! 👈` : "you are here! 👈";
+      if (maxIdx === currentIdx && maxRating !== null) tag.textContent += ` · 🏆 ${maxRating}`;
+    } else if (i === maxIdx && maxRating !== null) {
+      tag.textContent = `🏆 max ${maxRating}`;
+    }
+
+    row.append(emoji, name, tag);
+    ladder.append(row);
+  }
+  container.append(ladder);
+  if (currentRow) {
+    requestAnimationFrame(() => currentRow.scrollIntoView({ block: "nearest" }));
+  }
 }
 
 function renderProfile(profile) {
   const rated = !!profile && Number.isFinite(profile.rating);
   const color = rated ? codeforcesRankColor(profile.rating) : null;
 
-  // Popover rating block (full detail, including max).
-  if (els.profileRank) {
-    if (!profile) {
-      els.profileRank.textContent = "—";
-      els.profileRank.classList.add("muted-rank");
-      els.profileRank.style.color = "";
-      els.profileRatingValue.hidden = true;
-      els.profileMaxRating.hidden = true;
-    } else {
-      els.profileRank.classList.toggle("muted-rank", !rated);
-      els.profileRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
-      els.profileRank.style.color = color || "";
-      els.profileRatingValue.hidden = !rated;
-      els.profileRatingValue.textContent = rated ? String(profile.rating) : "";
-      els.profileRatingValue.style.color = color || "";
-      const hasMax = Number.isFinite(profile.maxRating);
-      els.profileMaxRating.hidden = !hasMax;
-      els.profileMaxRating.textContent = hasMax
-        ? `max ${profile.maxRating}${profile.maxRank ? ` · ${titleCaseRank(profile.maxRank)}` : ""}`
-        : "";
-    }
-  }
+  renderRankLadder(profile);
 
   // Topbar badge (rank over rating, no max).
   if (els.profileBadge) {
     const showBadge = rated || (profile && profile.rank);
     els.profileBadge.hidden = !showBadge;
     if (showBadge) {
+      if (els.profileBadgeEmoji) {
+        const rankIdx = rankIndexForRating(profile.rating);
+        els.profileBadgeEmoji.textContent = rankIdx !== -1 ? CF_RANKS[rankIdx].emoji : "";
+      }
       els.profileBadgeRank.textContent = rated ? titleCaseRank(profile.rank) : "Unrated";
       els.profileBadgeRating.hidden = !rated;
       els.profileBadgeRating.textContent = rated ? String(profile.rating) : "";
@@ -895,7 +959,80 @@ function renderProfile(profile) {
     }
   }
 
+  if (els.profileStats) {
+    const hasStats = !!profile && (Number.isFinite(profile.solved) || Number.isFinite(profile.contests));
+    els.profileStats.hidden = !hasStats;
+    if (hasStats) {
+      els.profileSolved.textContent = String(profile.solved ?? 0);
+      els.profileContests.textContent = String(profile.contests ?? 0);
+    }
+  }
+
+  renderHeatmap(profile && profile.heatmap);
   setProfileIconColor(color);
+}
+
+function heatLevel(count) {
+  if (count <= 0) return 0;
+  if (count <= 2) return 1;
+  if (count <= 5) return 2;
+  if (count <= 9) return 3;
+  return 4;
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// GitHub-style submission heatmap: 53 week columns × 7 day rows.
+function renderHeatmap(heatmap) {
+  const container = els.profileHeatmap;
+  if (!container) return;
+  if (!heatmap || typeof heatmap !== "object" || !Object.keys(heatmap).length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = "";
+
+  const grid = document.createElement("div");
+  grid.className = "heatmap-grid";
+
+  const weeks = 26; // last ~6 months
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(start.getDate() - (weeks * 7 - 1));
+  start.setDate(start.getDate() - start.getDay()); // align to Sunday
+
+  let total = 0;
+  for (let w = 0; w < weeks; w++) {
+    const column = document.createElement("div");
+    column.className = "heatmap-week";
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + w * 7 + d);
+      const cell = document.createElement("span");
+      cell.className = "heatmap-cell";
+      if (date > today) {
+        cell.classList.add("future");
+      } else {
+        const key = dateKey(date);
+        const count = heatmap[key] || 0;
+        total += count;
+        cell.dataset.level = String(heatLevel(count));
+        cell.title = `${count} submission${count === 1 ? "" : "s"} · ${key}`;
+      }
+      column.append(cell);
+    }
+    grid.append(column);
+  }
+
+  const title = document.createElement("div");
+  title.className = "profile-heatmap-title";
+  title.textContent = `${total} submission${total === 1 ? "" : "s"} in the last 6 months`;
+  container.append(title, grid);
 }
 
 function setProfileIconColor(color) {

@@ -488,17 +488,71 @@ async function fetchCodeforcesProfile({ handle }) {
   }
 
   const user = data.result[0];
+  const activity = await fetchCodeforcesActivity(handle).catch(() => ({ heatmap: {}, solved: 0 }));
+  const contests = await fetchCodeforcesContestCount(handle).catch(() => 0);
   const profile = {
     handle: user.handle || handle,
     rating: Number.isFinite(user.rating) ? user.rating : null,
     maxRating: Number.isFinite(user.maxRating) ? user.maxRating : null,
     rank: user.rank || null,
     maxRank: user.maxRank || null,
-    titlePhoto: user.titlePhoto || null
+    titlePhoto: user.titlePhoto || null,
+    heatmap: activity.heatmap,
+    solved: activity.solved,
+    contests
   };
 
   profileCache.set(key, { data: profile, expires: Date.now() + profileCacheTtlMs });
   return profile;
+}
+
+const sixMonthsMs = 183 * 24 * 60 * 60 * 1000;
+
+// Codeforces has no heatmap API — derive from recent user.status submissions:
+// a per-day submission count for the last year (heatmap, keyed "YYYY-MM-DD")
+// and the number of distinct problems solved (verdict OK) in the last 6 months.
+async function fetchCodeforcesActivity(handle) {
+  const apiUrl = new URL("https://codeforces.com/api/user.status");
+  apiUrl.searchParams.set("handle", handle);
+  apiUrl.searchParams.set("from", "1");
+  apiUrl.searchParams.set("count", "10000");
+
+  const { ok, data } = await httpsGetJson(apiUrl, {
+    headers: { "User-Agent": "Forge-IDE/1.0" }
+  });
+  if (!ok || data?.status !== "OK" || !Array.isArray(data.result)) return { heatmap: {}, solved: 0 };
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const heatmapCutoff = Date.now() - 372 * dayMs;
+  const solvedCutoff = Date.now() - sixMonthsMs;
+  const heatmap = {};
+  const solved = new Set();
+  for (const submission of data.result) {
+    const time = (submission.creationTimeSeconds || 0) * 1000;
+    if (time >= heatmapCutoff) {
+      const date = new Date(time);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      heatmap[key] = (heatmap[key] || 0) + 1;
+    }
+    if (time >= solvedCutoff && submission.verdict === "OK" && submission.problem) {
+      solved.add(`${submission.problem.contestId || "x"}-${submission.problem.index || ""}-${submission.problem.name || ""}`);
+    }
+  }
+  return { heatmap, solved: solved.size };
+}
+
+// Rated contest participations in the last 6 months (from user.rating history).
+async function fetchCodeforcesContestCount(handle) {
+  const apiUrl = new URL("https://codeforces.com/api/user.rating");
+  apiUrl.searchParams.set("handle", handle);
+
+  const { ok, data } = await httpsGetJson(apiUrl, {
+    headers: { "User-Agent": "Forge-IDE/1.0" }
+  });
+  if (!ok || data?.status !== "OK" || !Array.isArray(data.result)) return 0;
+
+  const cutoff = Math.floor((Date.now() - sixMonthsMs) / 1000);
+  return data.result.filter((entry) => (entry.ratingUpdateTimeSeconds || 0) >= cutoff).length;
 }
 
 async function materializeContestFiles(contest, { language, templates }) {

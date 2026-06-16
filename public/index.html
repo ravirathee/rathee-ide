@@ -78,35 +78,49 @@
               </label>
             </div>
             <button id="cfStatusBtn">Status</button>
-            <div id="profileBadge" class="profile-badge" hidden>
-              <span id="profileBadgeRank" class="profile-badge-rank"></span>
-              <span id="profileBadgeRating" class="profile-badge-rating"></span>
-            </div>
             <div class="profile-dropdown">
               <button id="profileBtn" class="icon-button profile-button" type="button" aria-haspopup="true" aria-expanded="false" title="Codeforces profile" aria-label="Codeforces profile">
-                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                  <circle cx="12" cy="8.2" r="3.4" />
-                  <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
-                </svg>
+                <span id="profileBadge" class="profile-badge" hidden>
+                  <span id="profileBadgeEmoji" class="profile-badge-emoji" aria-hidden="true"></span>
+                  <span class="profile-badge-text">
+                    <span id="profileBadgeRank" class="profile-badge-rank"></span>
+                    <span id="profileBadgeRating" class="profile-badge-rating"></span>
+                  </span>
+                </span>
+                <span class="profile-icon-circle">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <circle cx="12" cy="8.2" r="3.4" />
+                    <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+                  </svg>
+                </span>
               </button>
               <div id="profileMenu" class="profile-menu" hidden>
                 <label class="profile-menu-field">
                   <span>Codeforces handle</span>
-                  <input id="topProfileHandleInput" type="text" placeholder="tourist or profile URL" autocomplete="off" spellcheck="false" />
-                </label>
-                <div id="profileRating" class="profile-rating">
-                  <div class="profile-rating-main">
-                    <span id="profileRank" class="profile-rank"></span>
-                    <span id="profileRatingValue" class="profile-rating-value"></span>
+                  <div class="profile-handle-row">
+                    <input id="topProfileHandleInput" type="text" placeholder="tourist or profile URL" autocomplete="off" spellcheck="false" />
+                    <button id="profileReloadBtn" class="profile-reload-button" type="button" title="Reload from Codeforces" aria-label="Reload from Codeforces">
+                      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                        <path d="M20 11a8 8 0 1 0-.6 4" />
+                        <path d="M20 4.5V11h-6.5" />
+                      </svg>
+                    </button>
                   </div>
-                  <div id="profileMaxRating" class="profile-max"></div>
-                  <button id="profileReloadBtn" class="profile-reload-button" type="button" title="Reload rating from Codeforces" aria-label="Reload rating from Codeforces">
-                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                      <path d="M20 11a8 8 0 1 0-.6 4" />
-                      <path d="M20 4.5V11h-6.5" />
-                    </svg>
-                  </button>
+                </label>
+                <div id="profileRating" class="profile-rating"></div>
+                <div id="profileStats" class="profile-stats" hidden>
+                  <div class="profile-stat">
+                    <span id="profileSolved" class="profile-stat-value solved"></span>
+                    <span class="profile-stat-label">Problems Solved</span>
+                    <span class="profile-stat-sub">in last 6 months</span>
+                  </div>
+                  <div class="profile-stat">
+                    <span id="profileContests" class="profile-stat-value"></span>
+                    <span class="profile-stat-label">Contests Participated</span>
+                    <span class="profile-stat-sub">in last 6 months</span>
+                  </div>
                 </div>
+                <div id="profileHeatmap" class="profile-heatmap" hidden></div>
                 <a id="profileOpenLink" class="profile-open-link" href="https://codeforces.com/" target="_blank" rel="noopener noreferrer">Open profile ↗</a>
               </div>
             </div>
