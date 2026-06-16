@@ -1184,7 +1184,8 @@ function numberToLetters(index) {
 function switchCodeFile(filename) {
   const isPython = els.language.value === "python";
   const activeFile = isPython ? activePyFile : activeCppFile;
-  if (filename === activeFile) return;
+  if (filename === activeFile && editorView === "code") return;
+  const leavingTemplateView = editorView !== "code";
   saveCurrentState();
   editorView = "code";
   if (isPython) activePyFile = filename;
@@ -1195,7 +1196,10 @@ function switchCodeFile(filename) {
   els.input.value = inputs[filename] || "";
   updateEditorEmptyState();
   updateDrawerActiveItem();
-  updateActiveFileTab();
+  // Coming back from a template view, the tab strip still shows the template
+  // tabs — rebuild it into the code-file tabs; otherwise just move the highlight.
+  if (leavingTemplateView) renderFileTabs();
+  else updateActiveFileTab();
   updateEditorActionButton();
   setStatus("Idle", "idle");
   refreshCodeforcesStatus(false);
