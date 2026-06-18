@@ -232,6 +232,36 @@
           <div id="emptyEditorState" class="empty-editor-state" hidden>
             <button id="createFirstFileBtn" class="create-file-button">Create A.cpp</button>
           </div>
+          <div id="debugResizeHandle" class="resize-handle horizontal-handle debug-resize-handle" title="Resize debugger"></div>
+          <section id="editorDebugPanel" class="editor-debug-panel">
+            <div class="pane-head">
+              <span>Debugger</span>
+              <div class="pane-head-actions">
+                <button id="copyDebugBtn" class="copy-button" title="Copy debugger output" aria-label="Copy debugger output">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+                  </svg>
+                </button>
+                <button id="hideDebugBtn" class="pane-collapse-button debug-collapse-button" title="Hide debugger panel" aria-label="Hide debugger panel">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <path d="M9 6 L15 12 L9 18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="editor-debug-body">
+              <section class="debug-subpane">
+                <div class="debug-subhead">Debugger</div>
+                <pre id="debug" class="debug-panel editor-debug-output" aria-label="Debug output"></pre>
+              </section>
+              <div id="debugSplitResizeHandle" class="resize-handle vertical-handle debug-split-resize-handle" title="Resize debugger and call stack"></div>
+              <section class="debug-subpane">
+                <div class="debug-subhead">Call stack</div>
+                <pre id="callStack" class="debug-panel editor-debug-output" aria-label="Call stack output"></pre>
+              </section>
+            </div>
+          </section>
         </section>
 
         <div id="mainResizeHandle" class="resize-handle vertical-handle" title="Resize panes"></div>
@@ -260,10 +290,7 @@
           <div id="ioResizeHandle" class="resize-handle horizontal-handle" title="Resize input and output"></div>
           <div class="io-section output-section">
             <div class="pane-head">
-              <div class="pane-tabs">
-                <button id="outputTabBtn" class="pane-tab active">Output</button>
-                <button id="debugToggle" class="pane-tab" title="Show debugger diagnostics">Debugger</button>
-              </div>
+              <span>Output</span>
               <div class="pane-head-actions">
                 <button id="copyOutputBtn" class="copy-button" title="Copy output" aria-label="Copy output">
                   <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -279,7 +306,6 @@
               </div>
             </div>
             <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
-            <pre id="debug" class="debug-panel inline-debug" hidden aria-label="Debug output"></pre>
           </div>
           </section>
         </section>

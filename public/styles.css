@@ -1046,7 +1046,11 @@ button:disabled {
 .editor-pane {
   position: relative;
   grid-area: editor;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr) 8px minmax(120px, var(--debug-height, 28%));
+}
+
+.editor-pane.debug-hidden {
+  grid-template-rows: auto auto minmax(0, 1fr) 0 42px;
 }
 
 /* gap from the collapsed drawer rail — there is no resize handle there,
@@ -1148,6 +1152,24 @@ body.resizing .resize-handle::after {
 
 .editor-top {
   min-width: 0;
+  grid-row: 1;
+}
+
+.editor-quick-settings {
+  grid-row: 2;
+}
+
+.editor-pane > .CodeMirror,
+#code {
+  grid-row: 3;
+}
+
+.editor-debug-panel {
+  grid-row: 5;
+}
+
+.debug-resize-handle {
+  grid-row: 4;
 }
 
 .editor-actions {
@@ -1381,12 +1403,6 @@ body.resizing .resize-handle::after {
   font-size: 0.85rem;
 }
 
-.pane-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .pane-tab {
   min-height: 26px;
   border-radius: 7px;
@@ -1570,6 +1586,20 @@ textarea,
   border-right: 1px solid var(--line);
 }
 
+.CodeMirror-gutter.breakpoints {
+  width: 18px;
+}
+
+.breakpoint-marker {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin: 7px auto 0;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.22);
+}
+
 .CodeMirror-linenumber {
   color: var(--muted);
 }
@@ -1636,8 +1666,7 @@ textarea,
   overflow: visible;
 }
 
-.io-section.collapsed textarea,
-.io-section.collapsed .debug-panel {
+.io-section.collapsed textarea {
   display: none;
 }
 
@@ -1692,7 +1721,58 @@ textarea,
   margin: 0;
 }
 
-.inline-debug {
+.editor-debug-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.editor-debug-panel.collapsed {
+  grid-template-rows: auto;
+  min-height: 42px;
+  overflow: visible;
+}
+
+.editor-debug-panel.collapsed .editor-debug-body {
+  display: none;
+}
+
+.editor-debug-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px minmax(180px, var(--debug-stack-width, 36%));
+  min-height: 0;
+}
+
+.debug-subpane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.debug-split-resize-handle {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.debug-subhead {
+  min-height: 24px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--header-tint);
+  font-family: var(--mono);
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.editor-debug-output {
   background: var(--editor-bg);
 }
 

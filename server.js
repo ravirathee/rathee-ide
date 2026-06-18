@@ -192,7 +192,12 @@ const server = http.createServer(async (req, res) => {
     const filePath = safePublicPath(url.pathname);
     const exists = await stat(filePath).then((s) => s.isFile()).catch(() => false);
     const target = exists ? filePath : path.join(publicDir, "index.html");
-    res.writeHead(200, { "Content-Type": mime[path.extname(target)] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": mime[path.extname(target)] || "application/octet-stream",
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0"
+    });
     createReadStream(target).pipe(res);
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Unexpected server error" });
@@ -885,7 +890,7 @@ function extractContestId(contestUrl) {
   return "";
 }
 
-async function executeCode({ language, code, input = "", mode = "run" }) {
+async function executeCode({ language, code, input = "", mode = "run", breakpoints = [] }) {
   if (!["python", "cpp"].includes(language)) {
     throw new Error("Unsupported language.");
   }
@@ -907,6 +912,8 @@ async function executeCode({ language, code, input = "", mode = "run" }) {
     let compile = null;
     let run;
 
+    const breakpointLines = normalizeBreakpoints(breakpoints);
+
     if (language === "python") {
       run = await runProcess("python3", [source], { input, cwd: runDir, timeoutMs: runTimeoutMs });
     } else {
@@ -915,8 +922,7 @@ async function executeCode({ language, code, input = "", mode = "run" }) {
         "-std=c++17",
         "-Wall",
         "-Wextra",
-        "-O2",
-        ...(mode === "debug" ? ["-g", "-fsanitize=address,undefined"] : []),
+        ...(mode === "debug" ? ["-O0", "-g", "-fsanitize=address,undefined"] : ["-O2"]),
         source,
         "-o",
         binary
@@ -927,14 +933,43 @@ async function executeCode({ language, code, input = "", mode = "run" }) {
         return formatResult({ language, mode, startedAt, compile, run: null, output: "" });
       }
 
-      run = await runProcess(binary, [], { input, cwd: runDir, timeoutMs: runTimeoutMs });
+      run = mode === "debug" && breakpointLines.length
+        ? await runLldbDebugger({ binary, source, inputFile, cwd: runDir, breakpoints: breakpointLines })
+        : await runProcess(binary, [], { input, cwd: runDir, timeoutMs: runTimeoutMs });
     }
 
-    await writeFile(outputFile, run.stdout, "utf8");
-    return formatResult({ language, mode, startedAt, compile, run, output: run.stdout });
+    const output = run.debugger ? "" : run.stdout;
+    await writeFile(outputFile, output, "utf8");
+    return formatResult({ language, mode, startedAt, compile, run, output });
   } finally {
     await rm(runDir, { recursive: true, force: true });
   }
+}
+
+function normalizeBreakpoints(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value
+    .map((line) => Number(line))
+    .filter((line) => Number.isInteger(line) && line > 0 && line < 100000)))
+    .sort((a, b) => a - b);
+}
+
+async function runLldbDebugger({ binary, source, inputFile, cwd, breakpoints }) {
+  const commands = [
+    ...breakpoints.flatMap((line) => ["-o", `breakpoint set --file ${path.basename(source)} --line ${line}`]),
+    "-o", `process launch -i ${inputFile}`,
+    "-o", "frame variable",
+    "-o", "bt",
+    "-o", "process kill",
+    "-o", "quit"
+  ];
+  const result = await runProcess("lldb", ["--batch", ...commands, binary], {
+    cwd,
+    timeoutMs: runTimeoutMs
+  });
+  result.debugger = "lldb";
+  result.breakpoints = breakpoints;
+  return result;
 }
 
 function formatResult({ language, mode, startedAt, compile, run, output }) {
@@ -972,13 +1007,81 @@ function buildDebugReport({ language, compile, run, status }) {
   }
 
   if (run?.code !== 0) {
+    if (run?.debugger === "lldb") {
+      return buildLldbReport(run);
+    }
     const heading = language === "python"
       ? "Python traceback"
       : "C++ runtime diagnostics";
     return `${heading}\n${run.stderr || "The process exited with a non-zero status without diagnostics."}`;
   }
 
+  if (run?.debugger === "lldb") {
+    return buildLldbReport(run);
+  }
+
   return "Debug run completed successfully. No runtime errors were reported.";
+}
+
+function buildLldbReport(run) {
+  const text = [run.stdout, run.stderr].filter(Boolean).join("\n").trim();
+  if (run.timedOut) {
+    return "Debugger report\nLLDB timed out while running the program.";
+  }
+
+  const stopped = /stop reason = breakpoint/i.test(text);
+  if (!stopped) {
+    return [
+      "Debugger report",
+      "Program finished without hitting a breakpoint.",
+      "",
+      text || "LLDB produced no output."
+    ].join("\n");
+  }
+
+  const stopLine = text.split("\n").find((line) => /stop reason = breakpoint/i.test(line)) || "Paused at breakpoint.";
+  const variables = extractLldbCommandOutput(text, "frame variable", "bt")
+    .split("\n")
+    .filter((line) => /^\([^)]+\)\s+/.test(line.trim()))
+    .join("\n")
+    .trim();
+  const stack = extractLldbCommandOutput(text, "bt", "process kill")
+    .split("\n")
+    .filter((line) => /^(?:\*\s*)?(?:thread|frame #)|^\s*(?:\*\s*)?frame #/.test(line.trim()))
+    .join("\n")
+    .trim();
+
+  return [
+    "Paused at breakpoint",
+    stopLine.trim(),
+    "",
+    "Variables",
+    variables || "No local variables were reported for this frame.",
+    "",
+    "Call stack",
+    stack || "No call stack was reported."
+  ].join("\n");
+}
+
+function extractLldbCommandOutput(text, command, nextCommand) {
+  const lines = text.split("\n");
+  const collected = [];
+  let collecting = false;
+  for (const line of lines) {
+    if (!collecting && line.trim() === `(lldb) ${command}`) {
+      collecting = true;
+      continue;
+    }
+    if (collecting && line.trim() === `(lldb) ${nextCommand}`) {
+      break;
+    }
+    if (collecting) collected.push(line);
+  }
+  return collected
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
 }
 
 function runProcess(command, args, { input = "", cwd, timeoutMs }) {

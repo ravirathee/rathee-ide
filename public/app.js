@@ -14,19 +14,23 @@ const els = {
   contestSortItems: Array.from(document.querySelectorAll(".contest-sort-item")),
   language: document.querySelector("#language"),
   code: document.querySelector("#code"),
+  editorDebugPanel: document.querySelector("#editorDebugPanel"),
+  debugResizeHandle: document.querySelector("#debugResizeHandle"),
+  debugSplitResizeHandle: document.querySelector("#debugSplitResizeHandle"),
   emptyEditorState: document.querySelector("#emptyEditorState"),
   createFirstFileBtn: document.querySelector("#createFirstFileBtn"),
   input: document.querySelector("#input"),
   output: document.querySelector("#output"),
   sidePane: document.querySelector("#sidePane"),
   debug: document.querySelector("#debug"),
-  debugToggle: document.querySelector("#debugToggle"),
-  outputTabBtn: document.querySelector("#outputTabBtn"),
+  callStack: document.querySelector("#callStack"),
   hideInputBtn: document.querySelector("#hideInputBtn"),
   hideOutputBtn: document.querySelector("#hideOutputBtn"),
   copyInputBtn: document.querySelector("#copyInputBtn"),
   copyOutputBtn: document.querySelector("#copyOutputBtn"),
   copyCodeBtn: document.querySelector("#copyCodeBtn"),
+  copyDebugBtn: document.querySelector("#copyDebugBtn"),
+  hideDebugBtn: document.querySelector("#hideDebugBtn"),
   fileTabs: document.querySelector("#fileTabs"),
   contestListLink: document.querySelector("#contestListLink"),
   contestUrl: document.querySelector("#contestUrl"),
@@ -93,7 +97,6 @@ const els = {
   status: document.querySelector("#statusPill"),
   meta: document.querySelector("#meta"),
   runBtn: document.querySelector("#runBtn"),
-  debugBtn: document.querySelector("#debugBtn"),
   codeLeftBtn: document.querySelector("#codeLeftBtn"),
   codeRightBtn: document.querySelector("#codeRightBtn"),
   drawerResizeHandle: document.querySelector("#drawerResizeHandle"),
@@ -167,6 +170,7 @@ let settingsSaveTimer = null;
 let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
 let snippetSession = null;
 let autoCompletionDraftOpen = false;
+const breakpointsByFile = {};
 let layoutState = {
   showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
@@ -174,7 +178,10 @@ let layoutState = {
   showInput: localStorage.getItem("rathee.showInput") !== "false",
   showOutput: localStorage.getItem("rathee.showOutput") !== "false",
   sideWidth: Number(localStorage.getItem("rathee.sideWidth") || 38),
-  inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45)
+  inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45),
+  showDebug: localStorage.getItem("rathee.showDebug") !== "false",
+  debugHeight: Number(localStorage.getItem("rathee.debugHeight") || 28),
+  debugStackWidth: Number(localStorage.getItem("rathee.debugStackWidth") || 36)
 };
 
 loadAppSettings().finally(boot);
@@ -212,6 +219,9 @@ function applyAppSettings(settings) {
   if (typeof layout.showOutput === "boolean") layoutState.showOutput = layout.showOutput;
   if (Number.isFinite(Number(layout.sideWidth))) layoutState.sideWidth = Number(layout.sideWidth);
   if (Number.isFinite(Number(layout.inputHeight))) layoutState.inputHeight = Number(layout.inputHeight);
+  if (typeof layout.showDebug === "boolean") layoutState.showDebug = layout.showDebug;
+  if (Number.isFinite(Number(layout.debugHeight))) layoutState.debugHeight = Number(layout.debugHeight);
+  if (Number.isFinite(Number(layout.debugStackWidth))) layoutState.debugStackWidth = Number(layout.debugStackWidth);
 }
 
 function currentAppSettings() {
@@ -232,7 +242,10 @@ function currentAppSettings() {
       showInput: layoutState.showInput,
       showOutput: layoutState.showOutput,
       sideWidth: layoutState.sideWidth,
-      inputHeight: layoutState.inputHeight
+      inputHeight: layoutState.inputHeight,
+      showDebug: layoutState.showDebug,
+      debugHeight: layoutState.debugHeight,
+      debugStackWidth: layoutState.debugStackWidth
     }
   };
 }
@@ -485,7 +498,6 @@ function boot() {
   els.input.value = "";
   els.language.addEventListener("change", switchLanguage);
   els.runBtn.addEventListener("click", () => submit("run"));
-  els.debugBtn?.addEventListener("click", () => submit("debug"));
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
   els.drawerTemplatesBtn.addEventListener("click", () => {
@@ -584,9 +596,9 @@ function boot() {
   els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
   els.copyOutputBtn.addEventListener("click", () => copyPaneText(els.output.value, els.copyOutputBtn));
   els.copyCodeBtn.addEventListener("click", () => copyPaneText(getEditorCode(), els.copyCodeBtn));
+  els.copyDebugBtn.addEventListener("click", () => copyPaneText(combinedDebugText(), els.copyDebugBtn));
+  els.hideDebugBtn.addEventListener("click", toggleDebugPanel);
   els.revealIoBtn.addEventListener("click", revealInputOutput);
-  els.outputTabBtn.addEventListener("click", () => setOutputView("output"));
-  els.debugToggle.addEventListener("click", () => setOutputView("debug"));
   initResizablePanes();
   applyWorkspaceLayout();
   setEditorFontSize(editorFontSize);
@@ -823,6 +835,7 @@ function initCodeEditor() {
   });
   codeEditor.setSize("100%", "100%");
   codeEditor.on("keydown", handleEditorKeyDown);
+  codeEditor.on("gutterClick", handleEditorGutterClick);
 }
 
 function codeMirrorOptions() {
@@ -830,6 +843,7 @@ function codeMirrorOptions() {
     mode: "text/x-c++src",
     theme: "material-darker",
     lineNumbers: true,
+    gutters: ["CodeMirror-linenumbers", "breakpoints"],
     indentUnit: 4,
     tabSize: 4,
     indentWithTabs: false,
@@ -1005,6 +1019,7 @@ function setEditorCode(value) {
     codeEditor.setValue(value);
     settingEditorValue = false;
     codeEditor.refresh();
+    requestAnimationFrame(renderEditorBreakpoints);
   } else {
     els.code.value = value;
   }
@@ -1024,10 +1039,63 @@ function setEditorLanguage(language) {
   requestAnimationFrame(() => codeEditor.refresh());
 }
 
+function breakpointKey() {
+  const activeFile = currentActiveFile();
+  if (!activeFile || editorView !== "code") return "";
+  return `${els.language.value}:${codeFileScope}:${activeContestDir || "workspace"}:${activeFile}`;
+}
+
+function currentBreakpoints() {
+  const key = breakpointKey();
+  if (!key) return new Set();
+  breakpointsByFile[key] ||= new Set();
+  return breakpointsByFile[key];
+}
+
+function handleEditorGutterClick(cm, line, gutter) {
+  if (!["breakpoints", "CodeMirror-linenumbers"].includes(gutter) || editorView !== "code" || !currentActiveFile()) return;
+  const breakpoints = currentBreakpoints();
+  const lineNumber = line + 1;
+  if (breakpoints.has(lineNumber)) {
+    breakpoints.delete(lineNumber);
+  } else {
+    breakpoints.add(lineNumber);
+  }
+  renderEditorBreakpoints();
+}
+
+function renderEditorBreakpoints() {
+  if (!codeEditor) return;
+  codeEditor.clearGutter("breakpoints");
+  if (editorView !== "code") return;
+  currentBreakpoints().forEach((lineNumber) => {
+    const marker = document.createElement("span");
+    marker.className = "breakpoint-marker";
+    marker.title = `Breakpoint on line ${lineNumber}`;
+    codeEditor.setGutterMarker(lineNumber - 1, "breakpoints", marker);
+  });
+}
+
+function activeBreakpointLines() {
+  if (els.language.value !== "cpp" || editorView !== "code") return [];
+  return Array.from(currentBreakpoints())
+    .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber > 0)
+    .sort((a, b) => a - b);
+}
+
+function activeRunBreakpointLines() {
+  const offset = cppRunLineOffset();
+  return activeBreakpointLines()
+    .map((lineNumber) => lineNumber + offset)
+    .filter((lineNumber) => lineNumber > 0);
+}
+
 function applyWorkspaceLayout() {
   layoutState.drawerWidth = clamp(layoutState.drawerWidth, 220, 420);
   layoutState.sideWidth = clamp(layoutState.sideWidth, 12, 72);
   layoutState.inputHeight = clamp(layoutState.inputHeight, 18, 78);
+  layoutState.debugHeight = clamp(layoutState.debugHeight, 14, 55);
+  layoutState.debugStackWidth = clamp(layoutState.debugStackWidth, 22, 65);
 
   els.app.dataset.codeSide = layoutState.codeSide;
   els.app.style.setProperty("--drawer-width", `${layoutState.drawerWidth}px`);
@@ -1048,6 +1116,11 @@ function applyWorkspaceLayout() {
   els.outputSection.classList.toggle("collapsed", !layoutState.showOutput);
   els.ioResizeHandle.hidden = !(layoutState.showInput && layoutState.showOutput);
   els.ioPane.style.gridTemplateRows = buildIoRows();
+  els.editorDebugPanel.classList.toggle("collapsed", !layoutState.showDebug);
+  els.debugResizeHandle.hidden = !layoutState.showDebug;
+  document.querySelector(".editor-pane")?.classList.toggle("debug-hidden", !layoutState.showDebug);
+  document.querySelector(".editor-pane")?.style.setProperty("--debug-height", `${layoutState.debugHeight}%`);
+  els.editorDebugPanel.style.setProperty("--debug-stack-width", `${layoutState.debugStackWidth}%`);
 
   els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
   els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
@@ -1055,12 +1128,16 @@ function applyWorkspaceLayout() {
   els.quickCodeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
   updatePaneToggleButton(els.hideInputBtn, layoutState.showInput, "input");
   updatePaneToggleButton(els.hideOutputBtn, layoutState.showOutput, "output");
+  updatePaneToggleButton(els.hideDebugBtn, layoutState.showDebug, "debugger");
   localStorage.setItem("rathee.codeSide", layoutState.codeSide);
   localStorage.setItem("rathee.drawerWidth", String(layoutState.drawerWidth));
   localStorage.setItem("rathee.showInput", String(layoutState.showInput));
   localStorage.setItem("rathee.showOutput", String(layoutState.showOutput));
   localStorage.setItem("rathee.sideWidth", String(layoutState.sideWidth));
   localStorage.setItem("rathee.inputHeight", String(layoutState.inputHeight));
+  localStorage.setItem("rathee.showDebug", String(layoutState.showDebug));
+  localStorage.setItem("rathee.debugHeight", String(layoutState.debugHeight));
+  localStorage.setItem("rathee.debugStackWidth", String(layoutState.debugStackWidth));
   scheduleAppSettingsSave();
 
   requestAnimationFrame(() => codeEditor?.refresh());
@@ -1089,22 +1166,26 @@ function togglePanel(panel) {
   applyWorkspaceLayout();
 }
 
+function toggleDebugPanel() {
+  layoutState.showDebug = !layoutState.showDebug;
+  applyWorkspaceLayout();
+}
+
 function revealInputOutput() {
   layoutState.showInput = true;
   layoutState.showOutput = true;
   applyWorkspaceLayout();
 }
 
-function setOutputView(view) {
-  const showDebugPanel = view === "debug";
-  els.output.hidden = showDebugPanel;
-  els.debug.hidden = !showDebugPanel;
-  els.outputTabBtn.classList.toggle("active", !showDebugPanel);
-  els.debugToggle.classList.toggle("active", showDebugPanel);
-  if (!layoutState.showOutput) {
-    layoutState.showOutput = true;
+function setDebugPanelVisible(visible) {
+  if (visible) {
+    layoutState.showDebug = true;
     applyWorkspaceLayout();
   }
+  requestAnimationFrame(() => {
+    codeEditor?.setSize("100%", "100%");
+    codeEditor?.refresh();
+  });
 }
 
 function showSettings(visible) {
@@ -1483,6 +1564,8 @@ function initResizablePanes() {
   els.mainResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "main"));
   els.drawerResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "drawer"));
   els.ioResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "io"));
+  els.debugResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug"));
+  els.debugSplitResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug-split"));
 }
 
 function startResize(event, target) {
@@ -1492,8 +1575,12 @@ function startResize(event, target) {
   const startDrawerWidth = layoutState.drawerWidth;
   const startSideWidth = layoutState.sideWidth;
   const startInputHeight = layoutState.inputHeight;
+  const startDebugHeight = layoutState.debugHeight;
+  const startDebugStackWidth = layoutState.debugStackWidth;
   const workspaceRect = els.workspace.getBoundingClientRect();
   const ioRect = els.ioPane.getBoundingClientRect();
+  const editorRect = document.querySelector(".editor-pane")?.getBoundingClientRect();
+  const debugRect = els.editorDebugPanel.getBoundingClientRect();
   document.body.classList.add("resizing");
 
   const onMove = (moveEvent) => {
@@ -1508,6 +1595,12 @@ function startResize(event, target) {
     }
     if (target === "io") {
       layoutState.inputHeight = clamp(startInputHeight + ((moveEvent.clientY - startY) / ioRect.height) * 100, 18, 78);
+    }
+    if (target === "debug" && editorRect?.height) {
+      layoutState.debugHeight = clamp(startDebugHeight - ((moveEvent.clientY - startY) / editorRect.height) * 100, 14, 55);
+    }
+    if (target === "debug-split" && debugRect?.width) {
+      layoutState.debugStackWidth = clamp(startDebugStackWidth - ((moveEvent.clientX - startX) / debugRect.width) * 100, 22, 65);
     }
     applyWorkspaceLayout();
   };
@@ -1723,7 +1816,7 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
       }
     }
   } catch (error) {
-    els.debug.textContent = error.message;
+    setDebuggerOutput(error.message);
     setStatus("Load failed", "error");
     els.meta.textContent = "Saved contest could not be loaded from workspace";
     showDebug(true);
@@ -2124,7 +2217,7 @@ async function importContest() {
     scheduleAppSettingsSave();
     await loadSavedContestList();
   } catch (error) {
-    els.debug.textContent = error.message;
+    setDebuggerOutput(error.message);
     setStatus("Import failed", "error");
     els.meta.textContent = "Codeforces import failed";
     showDebug(true);
@@ -2191,7 +2284,7 @@ function applyContestProblems(contest, options = {}) {
   const placeholderMessage = contest.placeholder
     ? `Problem data is not available yet. Placeholder A${extension} through G${extension} files were created from ${isPython ? "Template.py" : "Template.cpp"}.`
     : "";
-  els.debug.textContent = [
+  setDebuggerOutput([
     contest.name,
     `${problems.length} problems ${source === "saved" ? "loaded from workspace" : "imported"}.`,
     `${sampleCount} sample inputs loaded.`,
@@ -2199,7 +2292,7 @@ function applyContestProblems(contest, options = {}) {
     !contest.placeholder && source !== "saved" && sampleCount < problems.length
       ? "Some sample inputs could not be fetched because Codeforces problem pages are protected from server-side scraping."
       : ""
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n"));
   showDebug(Boolean(placeholderMessage) || (!contest.placeholder && source !== "saved" && sampleCount < problems.length));
   setStatus(contest.placeholder ? "Placeholder" : source === "saved" ? "Loaded" : "Imported", "success");
   els.meta.textContent = contest.placeholder
@@ -2333,12 +2426,12 @@ async function submitToCodeforces() {
   await copyActiveCode();
   const submitUrl = `https://codeforces.com/contest/${problem.contestId}/submit/${encodeURIComponent(problem.index)}`;
   window.open(submitUrl, "_blank", "noopener,noreferrer");
-  els.debug.textContent = [
+  setDebuggerOutput([
     `Opened ${submitUrl}`,
     isPython ? "Active Python file was copied to clipboard." : "Combined Headers.hpp + active code file was copied to clipboard.",
     "Paste it into Codeforces and submit using your logged-in browser session.",
     "Click Status here after submitting, or reload/import again to fetch the latest verdict."
-  ].join("\n");
+  ].join("\n"));
   showDebug(true);
   setStatus("Submit opened", "idle");
   els.meta.textContent = `Code copied · submit ${problem.index} on Codeforces`;
@@ -2348,7 +2441,7 @@ async function copyActiveCode() {
   try {
     await navigator.clipboard.writeText(getSubmitCode());
   } catch {
-    els.debug.textContent = `${els.debug.textContent}\nClipboard permission was blocked. Select and copy the editor code manually.`;
+    appendDebuggerOutput("Clipboard permission was blocked. Select and copy the editor code manually.");
   }
 }
 
@@ -2385,7 +2478,22 @@ function combineCppSource(source) {
   return `${cppHeaders.trimEnd()}\n\n${stripDuplicateHeaders(source).trimStart()}`;
 }
 
+function cppRunLineOffset() {
+  if (els.language.value !== "cpp" || !activeCppFile) return 0;
+  const header = cppHeaders.trimEnd();
+  const headerLines = header ? header.split("\n").length : 0;
+  const activeSource = cppFiles[activeCppFile] || "";
+  const strippedPrefixLines = duplicateHeaderPrefixLineCount(activeSource);
+  return headerLines + 2 - strippedPrefixLines;
+}
+
 function stripDuplicateHeaders(source) {
+  const lines = source.split("\n");
+  let index = duplicateHeaderPrefixLineCount(source);
+  return lines.slice(index).join("\n");
+}
+
+function duplicateHeaderPrefixLineCount(source) {
   const lines = source.split("\n");
   let index = 0;
   while (index < lines.length) {
@@ -2401,7 +2509,7 @@ function stripDuplicateHeaders(source) {
     }
     break;
   }
-  return lines.slice(index).join("\n");
+  return index;
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
@@ -2409,7 +2517,7 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
     if (showWhenEmpty) {
       setStatus("No handle", "error");
       els.meta.textContent = "Set a valid Codeforces handle in Settings > Profile";
-      els.debug.textContent = "Codeforces handle must be 3-24 characters and may use letters, numbers, underscore, dot, or dash.";
+      setDebuggerOutput("Codeforces handle must be 3-24 characters and may use letters, numbers, underscore, dot, or dash.");
       showDebug(true);
     }
     return;
@@ -2437,7 +2545,7 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
 
     if (!result.latest) {
       if (showWhenEmpty) {
-        els.debug.textContent = `No submissions found for ${codeforcesHandle} on ${problem.index}.`;
+        setDebuggerOutput(`No submissions found for ${codeforcesHandle} on ${problem.index}.`);
         showDebug(true);
       }
       els.meta.textContent = `No Codeforces submissions yet for ${problem.index}`;
@@ -2446,7 +2554,7 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
 
     const latest = result.latest;
     const verdict = latest.verdict || "TESTING";
-    els.debug.textContent = [
+    setDebuggerOutput([
       `${codeforcesHandle} · ${problem.index}. ${problem.name}`,
       `Verdict: ${verdict}`,
       `Language: ${latest.programmingLanguage}`,
@@ -2454,13 +2562,13 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
       `Time: ${latest.timeConsumedMillis} ms`,
       `Memory: ${Math.round(latest.memoryConsumedBytes / 1024)} KB`,
       `Submission: https://codeforces.com/contest/${latest.contestId}/submission/${latest.id}`
-    ].join("\n");
+    ].join("\n"));
     showDebug(true);
     setStatus(verdict, verdict === "OK" ? "success" : "error");
     els.meta.textContent = `${problem.index} latest verdict: ${verdict}`;
   } catch (error) {
     if (showWhenEmpty) {
-      els.debug.textContent = error.message;
+      setDebuggerOutput(error.message);
       showDebug(true);
     }
     els.meta.textContent = "Could not fetch Codeforces status";
@@ -2476,9 +2584,11 @@ async function submit(mode) {
     els.meta.textContent = `Create a ${els.language.value === "python" ? "Python" : "C++"} file with + before running`;
     return;
   }
+  const breakpointLines = activeRunBreakpointLines();
+  const effectiveMode = mode === "run" && breakpointLines.length ? "debug" : mode;
   busy = true;
   setButtons(false);
-  setStatus(mode === "debug" ? "Debugging" : "Running", "idle");
+  setStatus(effectiveMode === "debug" ? "Debugging" : "Running", "idle");
   els.meta.textContent = "Executing...";
 
   try {
@@ -2489,7 +2599,8 @@ async function submit(mode) {
         language: els.language.value,
         code: getRunCode(),
         input: els.input.value,
-        mode
+        mode: effectiveMode,
+        breakpoints: effectiveMode === "debug" ? breakpointLines : []
       })
     });
 
@@ -2497,13 +2608,13 @@ async function submit(mode) {
     if (!res.ok) throw new Error(result.error || "Execution failed.");
 
     els.output.value = result.output || "";
-    els.debug.textContent = result.debug || result.stderr || "No debug output.";
+    setDebuggerOutput(result.debug || result.stderr || "No debug output.");
     const ok = result.status === "success";
     setStatus(labelForStatus(result.status), ok ? "success" : "error");
     els.meta.textContent = `${labelForStatus(result.status)} · ${result.elapsedMs}ms`;
-    showDebug(mode === "debug" || !ok);
+    showDebug(effectiveMode === "debug" || !ok);
   } catch (error) {
-    els.debug.textContent = error.message;
+    setDebuggerOutput(error.message);
     setStatus("Error", "error");
     els.meta.textContent = "Execution failed";
     showDebug(true);
@@ -2515,7 +2626,6 @@ async function submit(mode) {
 
 function setButtons(enabled) {
   els.runBtn.disabled = !enabled;
-  if (els.debugBtn) els.debugBtn.disabled = !enabled;
   els.cfSubmitBtn.disabled = !enabled;
   els.cfStatusBtn.disabled = !enabled;
 }
@@ -2531,11 +2641,38 @@ function setStatus(text, tone) {
 }
 
 function showDebug(visible) {
-  if (visible) {
-    setOutputView("debug");
-  } else {
-    setOutputView("output");
+  setDebugPanelVisible(visible);
+}
+
+function setDebuggerOutput(text) {
+  const { debuggerText, callStackText } = splitDebuggerText(text);
+  els.debug.textContent = debuggerText;
+  els.callStack.textContent = callStackText;
+}
+
+function appendDebuggerOutput(text) {
+  const prefix = combinedDebugText();
+  setDebuggerOutput([prefix, text].filter(Boolean).join("\n"));
+}
+
+function combinedDebugText() {
+  return [
+    els.debug.textContent,
+    els.callStack.textContent ? `Call stack\n${els.callStack.textContent}` : ""
+  ].filter(Boolean).join("\n\n");
+}
+
+function splitDebuggerText(text) {
+  const raw = String(text || "");
+  const marker = "\nCall stack\n";
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex === -1) {
+    return { debuggerText: raw, callStackText: "" };
   }
+  return {
+    debuggerText: raw.slice(0, markerIndex).trimEnd(),
+    callStackText: raw.slice(markerIndex + marker.length).trim()
+  };
 }
 
 function labelForStatus(status) {
