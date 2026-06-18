@@ -236,8 +236,7 @@
           <section id="editorDebugPanel" class="editor-debug-panel">
             <div class="pane-head">
               <span>Debugger</span>
-              <div class="pane-head-actions">
-                <div id="debugControls" class="debug-controls" hidden>
+              <div id="debugControls" class="debug-controls" hidden>
                   <button id="dbgStepOver" class="debug-control debug-control-primary" title="Step over · run the current line, then pause on the next line" aria-label="Step over">
                     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                       <path d="M5 8a7 7 0 0 1 12 0" />
@@ -281,8 +280,9 @@
                     </svg>
                     <span>Stop</span>
                   </button>
-                  <span id="dbgStatus" class="debug-status" aria-live="polite"></span>
-                </div>
+                <span id="dbgStatus" class="debug-status" aria-live="polite"></span>
+              </div>
+              <div class="pane-head-actions">
                 <button id="copyDebugBtn" class="copy-button" title="Copy debugger output" aria-label="Copy debugger output">
                   <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                     <rect x="9" y="9" width="11" height="11" rx="2" />
