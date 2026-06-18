@@ -1731,7 +1731,7 @@ textarea,
 
 .editor-debug-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   border-top: 1px solid var(--line);
@@ -1739,38 +1739,34 @@ textarea,
 }
 
 .editor-debug-panel > .pane-head {
-  padding: 2px 13px;
+  padding: 3px 13px;
 }
 
 .debug-controls {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--line);
-  background: var(--header-tint);
+  gap: 5px;
 }
 
 .debug-control {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   color: var(--text);
   background: var(--panel);
   font-family: var(--mono);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   cursor: pointer;
   transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
 }
 
 .debug-control svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -1802,10 +1798,9 @@ textarea,
 }
 
 .debug-status {
-  margin-left: auto;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   white-space: nowrap;
 }
 
