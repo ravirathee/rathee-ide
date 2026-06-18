@@ -57,6 +57,24 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
+    if (req.method === "POST" && url.pathname === "/api/debug/start") {
+      const body = await readJsonBody(req);
+      const result = await startDebugSession(body);
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/debug/step") {
+      const body = await readJsonBody(req);
+      const result = await stepDebugSession(body);
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/debug/stop") {
+      const body = await readJsonBody(req);
+      stopDebugSession(body && body.sessionId);
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (req.method === "GET" && url.pathname === "/api/files") {
       const [input, output] = await Promise.all([
         readTextWithFallback(inputFilePath, legacyInputFilePath),
@@ -970,6 +988,287 @@ async function runLldbDebugger({ binary, source, inputFile, cwd, breakpoints }) 
   result.debugger = "lldb";
   result.breakpoints = breakpoints;
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Interactive lldb debug sessions (C++ only).
+// A session keeps a single lldb process alive across HTTP requests so the UI
+// can step line-by-line. Commands are synchronised with a unique print marker
+// and the debuggee's stdio is redirected to files so it never mixes with the
+// debugger's own output.
+// ---------------------------------------------------------------------------
+
+const debugSessions = new Map();
+let debugSessionSeq = 0;
+const debugIdleMs = 5 * 60 * 1000;
+
+async function startDebugSession({ code, input = "", breakpoints = [] }) {
+  stopAllDebugSessions();
+  const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-debug-"));
+  const source = path.join(runDir, "main.cpp");
+  const binary = path.join(runDir, "main.out");
+  const progInput = path.join(runDir, "prog_in.txt");
+  const progOutput = path.join(runDir, "prog_out.txt");
+  const progError = path.join(runDir, "prog_err.txt");
+
+  try {
+    await Promise.all([
+      writeFile(source, String(code ?? ""), "utf8"),
+      writeFile(progInput, String(input ?? ""), "utf8"),
+      writeFile(progOutput, "", "utf8"),
+      writeFile(progError, "", "utf8")
+    ]);
+    await mkdir(ioFilesDir, { recursive: true });
+    await writeFile(inputFilePath, String(input ?? ""), "utf8");
+    await writeFile(outputFilePath, "", "utf8");
+
+    const compile = await runProcess("g++", [
+      "-std=c++17", "-Wall", "-Wextra", "-O0", "-g", source, "-o", binary
+    ], { cwd: runDir, timeoutMs: runTimeoutMs });
+
+    if (compile.code !== 0 || compile.timedOut) {
+      await rm(runDir, { recursive: true, force: true });
+      return {
+        state: "compile_error",
+        message: compile.timedOut
+          ? "Compilation timed out."
+          : (compile.stderr || compile.stdout || "Compilation failed.")
+      };
+    }
+
+    const child = spawn("lldb", ["--no-use-colors", binary], {
+      cwd: runDir,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const id = `dbg-${++debugSessionSeq}`;
+    const session = {
+      id,
+      child,
+      runDir,
+      source,
+      binary,
+      progInput,
+      progOutput,
+      progError,
+      breakpoints: normalizeBreakpoints(breakpoints),
+      pending: null,
+      markerSeq: 0,
+      stderr: "",
+      finished: false,
+      idleTimer: null
+    };
+    debugSessions.set(id, session);
+
+    child.stdout.on("data", (chunk) => handleLldbData(session, chunk.toString()));
+    child.stderr.on("data", (chunk) => { session.stderr += chunk.toString(); });
+    child.on("error", () => { session.finished = true; });
+
+    // Force synchronous execution so launch/step/continue block until the
+    // process actually stops; otherwise lldb returns to the prompt while the
+    // program is still running and we cannot report the stop location.
+    await sendLldbCommand(session, "script lldb.debugger.SetAsync(False)");
+    await sendLldbCommand(session, "settings set use-color false");
+    await sendLldbCommand(session, "settings set stop-line-count-before 0");
+    await sendLldbCommand(session, "settings set stop-line-count-after 0");
+
+    for (const line of session.breakpoints) {
+      await sendLldbCommand(session, `breakpoint set --file main.cpp --line ${line}`);
+    }
+    if (!session.breakpoints.length) {
+      await sendLldbCommand(session, "breakpoint set --name main");
+    }
+
+    await sendLldbCommand(
+      session,
+      `process launch -i "${progInput}" -o "${progOutput}" -e "${progError}"`
+    );
+
+    const state = await probeDebugState(session);
+    finalizeDebugState(session, state);
+    return { sessionId: id, ...state };
+  } catch (error) {
+    await rm(runDir, { recursive: true, force: true });
+    return { state: "error", message: error.message };
+  }
+}
+
+async function stepDebugSession({ sessionId, action }) {
+  const session = debugSessions.get(sessionId);
+  if (!session) {
+    return { state: "error", message: "No active debug session. Start debugging again." };
+  }
+  if (session.finished) {
+    const programOutput = await readProgramOutput(session);
+    return { sessionId, state: "exited", exitStatus: 0, programOutput, message: "Program already finished." };
+  }
+
+  const command = {
+    over: "thread step-over",
+    in: "thread step-in",
+    out: "thread step-out",
+    continue: "process continue"
+  }[action];
+  if (!command) {
+    return { sessionId, state: "error", message: "Unknown debug action." };
+  }
+
+  try {
+    await sendLldbCommand(session, command);
+    const state = await probeDebugState(session);
+    finalizeDebugState(session, state);
+    return { sessionId, ...state };
+  } catch (error) {
+    stopDebugSession(sessionId);
+    return { sessionId, state: "error", message: error.message };
+  }
+}
+
+function finalizeDebugState(session, state) {
+  if (state.state === "exited" || state.state === "error") {
+    cleanupDebugSession(session);
+  } else {
+    touchDebugSession(session);
+  }
+}
+
+async function probeDebugState(session) {
+  const status = await sendLldbCommand(session, "process status");
+  const exitMatch = status.match(/exited with status\s*=\s*(-?\d+)/i);
+  if (exitMatch || /is not (?:being run|currently being run)/i.test(status)) {
+    session.finished = true;
+    const programOutput = await readProgramOutput(session);
+    const exitStatus = exitMatch ? Number(exitMatch[1]) : 0;
+    return {
+      state: "exited",
+      exitStatus,
+      programOutput,
+      message: exitMatch
+        ? `Program exited with status ${exitStatus}.`
+        : "Program finished."
+    };
+  }
+
+  const reasonMatch = status.match(/stop reason\s*=\s*(.+)/i);
+  const frame = await sendLldbCommand(session, "frame info");
+  const locMatch = frame.match(/at\s+([^\s:]+):(\d+)/);
+  const locals = await sendLldbCommand(session, "frame variable");
+  const stack = await sendLldbCommand(session, "bt");
+  const programOutput = await readProgramOutput(session);
+
+  return {
+    state: "stopped",
+    file: locMatch ? locMatch[1] : "main.cpp",
+    line: locMatch ? Number(locMatch[2]) : null,
+    stopReason: reasonMatch ? reasonMatch[1].trim() : "",
+    locals: filterLldbLocals(locals),
+    callStack: filterLldbStack(stack),
+    programOutput
+  };
+}
+
+function filterLldbLocals(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() && !/^error:/i.test(line.trim()));
+  return lines.join("\n").trim() || "No local variables in this frame.";
+}
+
+function filterLldbStack(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /frame #|thread #/.test(line));
+  return lines.join("\n").trim() || String(text || "").trim() || "No call stack available.";
+}
+
+async function readProgramOutput(session) {
+  let text = "";
+  try {
+    text = await readFile(session.progOutput, "utf8");
+  } catch {
+    text = "";
+  }
+  await writeFile(outputFilePath, text, "utf8").catch(() => {});
+  return text;
+}
+
+function handleLldbData(session, text) {
+  if (!session.pending) return;
+  session.pending.chunks += text;
+  const idx = session.pending.chunks.indexOf(session.pending.marker);
+  if (idx === -1) return;
+  const raw = session.pending.chunks.slice(0, idx);
+  const pending = session.pending;
+  session.pending = null;
+  clearTimeout(pending.timer);
+  pending.resolve(cleanLldbOutput(raw, pending.command));
+}
+
+function sendLldbCommand(session, command, timeoutMs = runTimeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (!session.child || session.child.killed) {
+      reject(new Error("Debug session is not running."));
+      return;
+    }
+    const seq = ++session.markerSeq;
+    const marker = `RATHEEMARK${seq}END`;
+    const pending = { marker, command, chunks: "", resolve, reject, timer: null };
+    pending.timer = setTimeout(() => {
+      if (session.pending === pending) session.pending = null;
+      reject(new Error("Debugger command timed out (possible infinite loop)."));
+    }, timeoutMs);
+    session.pending = pending;
+    try {
+      session.child.stdin.write(`${command}\nscript print("RATHEEMARK" + "${seq}END")\n`);
+    } catch (error) {
+      clearTimeout(pending.timer);
+      session.pending = null;
+      reject(error);
+    }
+  });
+}
+
+function cleanLldbOutput(text, command) {
+  return String(text)
+    .split("\n")
+    .map((line) => line.replace(/^\(lldb\)\s?/, "").trimEnd())
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed === "(lldb)") return false;
+      // Piped stdin makes lldb echo the command and the trailing marker print.
+      if (command && trimmed === command.trim()) return false;
+      if (/^script print\("RATHEEMARK"/.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
+function touchDebugSession(session) {
+  if (session.idleTimer) clearTimeout(session.idleTimer);
+  session.idleTimer = setTimeout(() => cleanupDebugSession(session), debugIdleMs);
+}
+
+function stopDebugSession(sessionId) {
+  const session = debugSessions.get(sessionId);
+  if (session) cleanupDebugSession(session);
+}
+
+function stopAllDebugSessions() {
+  for (const session of [...debugSessions.values()]) cleanupDebugSession(session);
+}
+
+function cleanupDebugSession(session) {
+  debugSessions.delete(session.id);
+  if (session.idleTimer) clearTimeout(session.idleTimer);
+  if (session.pending) {
+    clearTimeout(session.pending.timer);
+    session.pending = null;
+  }
+  try { session.child.stdin.write("quit\n"); } catch { /* ignore */ }
+  try { session.child.kill("SIGKILL"); } catch { /* ignore */ }
+  rm(session.runDir, { recursive: true, force: true }).catch(() => {});
 }
 
 function formatResult({ language, mode, startedAt, compile, run, output }) {

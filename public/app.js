@@ -31,6 +31,14 @@ const els = {
   copyCodeBtn: document.querySelector("#copyCodeBtn"),
   copyDebugBtn: document.querySelector("#copyDebugBtn"),
   hideDebugBtn: document.querySelector("#hideDebugBtn"),
+  debugControls: document.querySelector("#debugControls"),
+  dbgStepOver: document.querySelector("#dbgStepOver"),
+  dbgStepIn: document.querySelector("#dbgStepIn"),
+  dbgStepOut: document.querySelector("#dbgStepOut"),
+  dbgContinue: document.querySelector("#dbgContinue"),
+  dbgRestart: document.querySelector("#dbgRestart"),
+  dbgStop: document.querySelector("#dbgStop"),
+  dbgStatus: document.querySelector("#dbgStatus"),
   fileTabs: document.querySelector("#fileTabs"),
   contestListLink: document.querySelector("#contestListLink"),
   contestUrl: document.querySelector("#contestUrl"),
@@ -171,6 +179,14 @@ let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
 let snippetSession = null;
 let autoCompletionDraftOpen = false;
 const breakpointsByFile = {};
+let debugSession = {
+  id: null,
+  active: false,
+  busy: false,
+  line: null,
+  lineOffset: 0,
+  params: null
+};
 let layoutState = {
   showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
@@ -498,6 +514,12 @@ function boot() {
   els.input.value = "";
   els.language.addEventListener("change", switchLanguage);
   els.runBtn.addEventListener("click", () => submit("run"));
+  els.dbgStepOver.addEventListener("click", () => debugStep("over"));
+  els.dbgStepIn.addEventListener("click", () => debugStep("in"));
+  els.dbgStepOut.addEventListener("click", () => debugStep("out"));
+  els.dbgContinue.addEventListener("click", () => debugStep("continue"));
+  els.dbgRestart.addEventListener("click", restartDebugSession);
+  els.dbgStop.addEventListener("click", () => stopDebugSession(true));
   els.menuBtn.addEventListener("click", toggleDrawer);
   els.drawerCloseBtn.addEventListener("click", () => showDrawer(false));
   els.drawerTemplatesBtn.addEventListener("click", () => {
@@ -1620,6 +1642,7 @@ function clamp(value, min, max) {
 }
 
 function switchLanguage() {
+  endDebugSessionOnContextChange();
   const nextLanguage = els.language.value;
   const previousLanguage = currentLanguage;
   if (nextLanguage !== previousLanguage) {
@@ -1826,6 +1849,7 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
 }
 
 function switchEditorView(view) {
+  if (view !== "code") endDebugSessionOnContextChange();
   saveCurrentState();
   if (view === "template" || view === "headers") {
     els.language.value = "cpp";
@@ -2104,6 +2128,7 @@ function switchCodeFile(filename) {
   const isPython = els.language.value === "python";
   const activeFile = isPython ? activePyFile : activeCppFile;
   if (filename === activeFile && editorView === "code") return;
+  endDebugSessionOnContextChange();
   const leavingTemplateView = editorView !== "code";
   saveCurrentState();
   editorView = "code";
@@ -2586,6 +2611,17 @@ async function submit(mode) {
   }
   const breakpointLines = activeRunBreakpointLines();
   const effectiveMode = mode === "run" && breakpointLines.length ? "debug" : mode;
+
+  if (effectiveMode === "debug") {
+    await startDebugSession({
+      code: getRunCode(),
+      input: els.input.value,
+      breakpoints: breakpointLines,
+      lineOffset: cppRunLineOffset()
+    });
+    return;
+  }
+
   busy = true;
   setButtons(false);
   setStatus(effectiveMode === "debug" ? "Debugging" : "Running", "idle");
@@ -2628,6 +2664,218 @@ function setButtons(enabled) {
   els.runBtn.disabled = !enabled;
   els.cfSubmitBtn.disabled = !enabled;
   els.cfStatusBtn.disabled = !enabled;
+}
+
+async function startDebugSession(params) {
+  if (debugSession.busy) return;
+  debugSession.params = params;
+  debugSession.lineOffset = params.lineOffset || 0;
+  debugSession.busy = true;
+  busy = true;
+  setButtons(false);
+  setDebugControlsVisible(true);
+  setDebugControlsEnabled(false);
+  setStatus("Debugging", "idle");
+  els.meta.textContent = "Starting debugger...";
+  els.dbgStatus.textContent = "Compiling...";
+  showDebug(true);
+  clearDebugLine();
+
+  try {
+    const res = await fetch("/api/debug/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: params.code,
+        input: params.input,
+        breakpoints: params.breakpoints || []
+      })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Could not start the debugger.");
+    debugSession.id = result.sessionId || null;
+    debugSession.active = result.state === "stopped";
+    applyDebugState(result);
+  } catch (error) {
+    endDebugSession();
+    setDebuggerOutput(error.message);
+    setStatus("Error", "error");
+    els.meta.textContent = "Debugger failed";
+    els.dbgStatus.textContent = "";
+  } finally {
+    debugSession.busy = false;
+    busy = false;
+    setButtons(true);
+    if (debugSession.active) setDebugControlsEnabled(true);
+  }
+}
+
+async function debugStep(action) {
+  if (!debugSession.active || debugSession.busy || !debugSession.id) return;
+  debugSession.busy = true;
+  setDebugControlsEnabled(false);
+  els.dbgStatus.textContent = action === "continue" ? "Running..." : "Stepping...";
+
+  try {
+    const res = await fetch("/api/debug/step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: debugSession.id, action })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Debugger step failed.");
+    debugSession.active = result.state === "stopped";
+    applyDebugState(result);
+  } catch (error) {
+    endDebugSession();
+    setDebuggerOutput(error.message);
+    setStatus("Error", "error");
+    els.dbgStatus.textContent = "";
+  } finally {
+    debugSession.busy = false;
+    if (debugSession.active) setDebugControlsEnabled(true);
+  }
+}
+
+async function restartDebugSession() {
+  if (debugSession.busy || !debugSession.params) return;
+  const params = debugSession.params;
+  await stopDebugSession(false);
+  await startDebugSession(params);
+}
+
+async function stopDebugSession(notifyServer) {
+  const sessionId = debugSession.id;
+  endDebugSession();
+  setStatus("Stopped", "idle");
+  els.meta.textContent = "Debug session ended";
+  if (notifyServer && sessionId) {
+    try {
+      await fetch("/api/debug/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId })
+      });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+function endDebugSession() {
+  debugSession.id = null;
+  debugSession.active = false;
+  debugSession.line = null;
+  clearDebugLine();
+  setDebugControlsEnabled(false);
+  setDebugControlsVisible(false);
+}
+
+function endDebugSessionOnContextChange() {
+  if (!debugSession.id && !debugSession.active) return;
+  debugSession.params = null;
+  stopDebugSession(true);
+}
+
+function applyDebugState(state) {
+  if (state.programOutput !== undefined && state.programOutput !== null) {
+    els.output.value = state.programOutput;
+  }
+
+  if (state.state === "compile_error") {
+    endDebugSession();
+    setDebuggerOutput(`Compiler diagnostics\n${state.message || "Compilation failed."}`);
+    setStatus("Compile error", "error");
+    els.meta.textContent = "Compile error";
+    els.dbgStatus.textContent = "";
+    return;
+  }
+
+  if (state.state === "error") {
+    endDebugSession();
+    setDebuggerOutput(state.message || "Debugger error.");
+    setStatus("Error", "error");
+    els.dbgStatus.textContent = "";
+    return;
+  }
+
+  if (state.state === "exited") {
+    clearDebugLine();
+    debugSession.active = false;
+    setDebugControlsEnabled(false);
+    const ok = !state.exitStatus;
+    setStatus(ok ? "Success" : "Runtime error", ok ? "success" : "error");
+    els.meta.textContent = state.message || "Program finished";
+    els.dbgStatus.textContent = "Finished";
+    setDebuggerOutput(state.message || "Program finished.");
+    return;
+  }
+
+  // state === "stopped"
+  const editorLine = Number.isInteger(state.line)
+    ? state.line - (debugSession.lineOffset || 0)
+    : null;
+  debugSession.line = editorLine;
+  highlightDebugLine(editorLine);
+
+  const reason = state.stopReason ? `Stopped: ${state.stopReason}` : "Paused";
+  const locationText = editorLine && editorLine > 0
+    ? `${reason}\nLine ${editorLine}`
+    : reason;
+  const debuggerText = [
+    locationText,
+    "",
+    "Variables",
+    state.locals || "No local variables in this frame."
+  ].join("\n");
+  els.debug.textContent = debuggerText;
+  els.callStack.textContent = remapStackLines(state.callStack || "");
+
+  setStatus("Paused", "idle");
+  els.meta.textContent = editorLine && editorLine > 0 ? `Paused at line ${editorLine}` : "Paused";
+  els.dbgStatus.textContent = editorLine && editorLine > 0 ? `Line ${editorLine}` : "Paused";
+}
+
+function remapStackLines(stack) {
+  const offset = debugSession.lineOffset || 0;
+  if (!offset) return stack;
+  return String(stack).replace(/main\.cpp:(\d+)/g, (match, line) => {
+    const mapped = Number(line) - offset;
+    return mapped > 0 ? `main.cpp:${mapped}` : match;
+  });
+}
+
+function highlightDebugLine(editorLine) {
+  clearDebugLine();
+  if (!codeEditor || !Number.isInteger(editorLine) || editorLine <= 0) return;
+  const lineIndex = editorLine - 1;
+  if (lineIndex >= codeEditor.lineCount()) return;
+  codeEditor.addLineClass(lineIndex, "background", "debug-current-line");
+  codeEditor.addLineClass(lineIndex, "gutter", "debug-current-line-number");
+  codeEditor.scrollIntoView({ line: lineIndex, ch: 0 }, 80);
+}
+
+function clearDebugLine() {
+  if (!codeEditor) return;
+  for (let i = 0; i < codeEditor.lineCount(); i += 1) {
+    codeEditor.removeLineClass(i, "background", "debug-current-line");
+    codeEditor.removeLineClass(i, "gutter", "debug-current-line-number");
+  }
+}
+
+function setDebugControlsVisible(visible) {
+  els.debugControls.hidden = !visible;
+}
+
+function setDebugControlsEnabled(enabled) {
+  els.dbgStepOver.disabled = !enabled;
+  els.dbgStepIn.disabled = !enabled;
+  els.dbgStepOut.disabled = !enabled;
+  els.dbgContinue.disabled = !enabled;
+  // Restart and Stop stay usable whenever a session exists.
+  const sessionExists = Boolean(debugSession.id);
+  els.dbgRestart.disabled = !sessionExists && !debugSession.params;
+  els.dbgStop.disabled = !sessionExists;
 }
 
 function setImportBusy(importing) {

@@ -250,9 +250,55 @@
                 </button>
               </div>
             </div>
+            <div id="debugControls" class="debug-controls" hidden>
+              <button id="dbgStepOver" class="debug-control debug-control-primary" title="Step over · run the current line, then pause on the next line" aria-label="Step over">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M5 8a7 7 0 0 1 12 0" />
+                  <path d="M17 4v4h-4" />
+                  <circle cx="11" cy="17" r="1.6" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Step</span>
+              </button>
+              <button id="dbgStepIn" class="debug-control" title="Step into the function call on this line" aria-label="Step into">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M12 4v9" />
+                  <path d="M8 9l4 4 4-4" />
+                  <circle cx="12" cy="18" r="1.6" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Step In</span>
+              </button>
+              <button id="dbgStepOut" class="debug-control" title="Run to the end of the current function and pause in the caller" aria-label="Step out">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M12 13V4" />
+                  <path d="M8 8l4-4 4 4" />
+                  <circle cx="12" cy="18" r="1.6" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Step Out</span>
+              </button>
+              <button id="dbgContinue" class="debug-control" title="Continue · run until the next breakpoint or the program ends" aria-label="Continue">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M7 5l11 7-11 7z" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Continue</span>
+              </button>
+              <button id="dbgRestart" class="debug-control" title="Restart the debug session from the beginning" aria-label="Restart">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <path d="M4 12a8 8 0 1 0 2.5-5.8" />
+                  <path d="M4 4v4h4" />
+                </svg>
+                <span>Restart</span>
+              </button>
+              <button id="dbgStop" class="debug-control debug-control-stop" title="Stop debugging" aria-label="Stop debugging">
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
+                </svg>
+                <span>Stop</span>
+              </button>
+              <span id="dbgStatus" class="debug-status" aria-live="polite"></span>
+            </div>
             <div class="editor-debug-body">
               <section class="debug-subpane">
-                <div class="debug-subhead">Debugger</div>
+                <div class="debug-subhead">Debug output</div>
                 <pre id="debug" class="debug-panel editor-debug-output" aria-label="Debug output"></pre>
               </section>
               <div id="debugSplitResizeHandle" class="resize-handle vertical-handle debug-split-resize-handle" title="Resize debugger and call stack"></div>
