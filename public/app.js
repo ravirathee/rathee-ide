@@ -41,6 +41,7 @@ const els = {
   editorSettings: document.querySelector("#editorSettings"),
   profileSettings: document.querySelector("#profileSettings"),
   templateSettings: document.querySelector("#templateSettings"),
+  autoCompletionSettings: document.querySelector("#autoCompletionSettings"),
   appearanceSettings: document.querySelector("#appearanceSettings"),
   modeLightBtn: document.querySelector("#modeLightBtn"),
   modeDarkBtn: document.querySelector("#modeDarkBtn"),
@@ -72,6 +73,11 @@ const els = {
   codeforcesHandleInput: document.querySelector("#codeforcesHandleInput"),
   editorFontSizeInput: document.querySelector("#editorFontSizeInput"),
   editorFontSelect: document.querySelector("#editorFontSelect"),
+  autoCompletionEnabled: document.querySelector("#autoCompletionEnabled"),
+  autoCompletionPairs: document.querySelector("#autoCompletionPairs"),
+  autoCompletionPlaceholder: document.querySelector("#autoCompletionPlaceholder"),
+  autoCompletionRuleList: document.querySelector("#autoCompletionRuleList"),
+  autoCompletionCreateRuleBtn: document.querySelector("#autoCompletionCreateRuleBtn"),
   fontSizeLabel: document.querySelector("#fontSizeLabel"),
   saveTemplateBtn: document.querySelector("#saveTemplateBtn"),
   resetCodeBtn: document.querySelector("#resetCodeBtn"),
@@ -138,6 +144,14 @@ let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
   || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
 const APPEARANCE_MODES = ["light", "dark"];
 const APPEARANCE_THEMES = ["aurora", "indigo", "sunset", "mono"];
+const DEFAULT_AUTO_COMPLETION = {
+  enabled: true,
+  pairs: true,
+  placeholder: "tabtab",
+  rules: {
+    for: "for(int i = 0 ; i < ntabtab ; i++){\n    tabtab\n}"
+  }
+};
 let appearanceMode = APPEARANCE_MODES.includes(localStorage.getItem("rathee.appearanceMode"))
   ? localStorage.getItem("rathee.appearanceMode")
   : "dark";
@@ -150,6 +164,9 @@ let codeSaveTimer = null;
 let currentLanguage = document.querySelector("#language").value;
 let editorQuickSettingsOpen = false;
 let settingsSaveTimer = null;
+let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
+let snippetSession = null;
+let autoCompletionDraftOpen = false;
 let layoutState = {
   showDrawer: true,
   drawerWidth: Number(localStorage.getItem("rathee.drawerWidth") || 280),
@@ -186,6 +203,7 @@ function applyAppSettings(settings) {
   const appearance = settings.appearance || {};
   if (APPEARANCE_MODES.includes(appearance.mode)) appearanceMode = appearance.mode;
   if (APPEARANCE_THEMES.includes(appearance.theme)) appearanceTheme = appearance.theme;
+  autoCompletion = normalizeAutoCompletionSettings(settings.autoCompletion);
 
   const layout = settings.layout || {};
   if (Number.isFinite(Number(layout.drawerWidth))) layoutState.drawerWidth = Number(layout.drawerWidth);
@@ -207,6 +225,7 @@ function currentAppSettings() {
       mode: appearanceMode,
       theme: appearanceTheme
     },
+    autoCompletion,
     layout: {
       drawerWidth: layoutState.drawerWidth,
       codeSide: layoutState.codeSide,
@@ -216,6 +235,227 @@ function currentAppSettings() {
       inputHeight: layoutState.inputHeight
     }
   };
+}
+
+function normalizeAutoCompletionSettings(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const rulesSource = source.rules && typeof source.rules === "object" && !Array.isArray(source.rules)
+    ? source.rules
+    : DEFAULT_AUTO_COMPLETION.rules;
+  const rules = {};
+  Object.entries(rulesSource).forEach(([trigger, template]) => {
+    const cleanTrigger = String(trigger || "").trim();
+    if (!cleanTrigger || /\s/.test(cleanTrigger)) return;
+    rules[cleanTrigger] = String(template ?? "");
+  });
+
+  return {
+    enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_AUTO_COMPLETION.enabled,
+    pairs: typeof source.pairs === "boolean" ? source.pairs : DEFAULT_AUTO_COMPLETION.pairs,
+    placeholder: cleanSnippetPlaceholder(source.placeholder),
+    rules
+  };
+}
+
+function cleanSnippetPlaceholder(value) {
+  const marker = String(value || "").trim();
+  return marker || DEFAULT_AUTO_COMPLETION.placeholder;
+}
+
+function renderAutoCompletionSettings() {
+  if (!els.autoCompletionEnabled || !els.autoCompletionRuleList) return;
+  els.autoCompletionEnabled.checked = Boolean(autoCompletion.enabled);
+  if (els.autoCompletionPairs) els.autoCompletionPairs.checked = Boolean(autoCompletion.pairs);
+  if (els.autoCompletionPlaceholder) els.autoCompletionPlaceholder.value = autoCompletion.placeholder;
+  els.autoCompletionRuleList.innerHTML = "";
+
+  const entries = Object.entries(autoCompletion.rules);
+  if (!entries.length && !autoCompletionDraftOpen) {
+    const empty = document.createElement("p");
+    empty.className = "autocomplete-empty";
+    empty.textContent = "No rules yet.";
+    els.autoCompletionRuleList.append(empty);
+  }
+
+  entries.forEach(([trigger, template]) => {
+    els.autoCompletionRuleList.append(createAutoCompletionRuleCard({ trigger, template }));
+  });
+
+  if (autoCompletionDraftOpen) {
+    els.autoCompletionRuleList.append(createAutoCompletionRuleCard({ isDraft: true }));
+  }
+}
+
+function createAutoCompletionRuleCard({ trigger = "", template = "", isDraft = false }) {
+  const card = document.createElement("div");
+  card.className = "autocomplete-rule-card";
+  if (!isDraft) card.dataset.trigger = trigger;
+
+  const actions = document.createElement("div");
+  actions.className = "autocomplete-card-actions";
+
+  const triggerLabel = document.createElement("label");
+  const triggerText = document.createElement("span");
+  triggerText.textContent = "Trigger";
+  const triggerInput = document.createElement("input");
+  triggerInput.type = "text";
+  triggerInput.value = trigger;
+  triggerInput.placeholder = "for";
+  triggerInput.spellcheck = false;
+  triggerInput.autocomplete = "off";
+  triggerLabel.append(triggerText, triggerInput);
+
+  const templateLabel = document.createElement("label");
+  const templateText = document.createElement("span");
+  templateText.textContent = "Expansion";
+  const templateInput = document.createElement("textarea");
+  templateInput.className = "settings-codearea";
+  templateInput.value = template;
+  templateInput.placeholder = sampleAutoCompletionTemplate();
+  templateInput.spellcheck = false;
+  templateLabel.append(templateText, templateInput);
+
+  if (isDraft) {
+    const maybeSaveDraft = () => addAutoCompletionRuleFromInputs(triggerInput, templateInput);
+    triggerInput.addEventListener("input", maybeSaveDraft);
+    templateInput.addEventListener("input", maybeSaveDraft);
+  } else {
+    const actionButton = createAutoCompletionIconButton({
+      type: "delete",
+      label: "Delete rule"
+    });
+    actions.append(actionButton);
+    triggerInput.addEventListener("change", () => renameAutoCompletionRule(trigger, triggerInput.value));
+    templateInput.addEventListener("input", () => updateAutoCompletionRule(trigger, templateInput.value));
+    actionButton.addEventListener("click", () => deleteAutoCompletionRule(trigger));
+  }
+
+  const side = document.createElement("div");
+  side.className = "autocomplete-card-side";
+  side.append(triggerLabel, actions);
+
+  card.append(side, templateLabel);
+  return card;
+}
+
+function createAutoCompletionIconButton({ type, label }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `icon-button autocomplete-icon-button autocomplete-${type}`;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = type === "delete"
+    ? `<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path d="M3 6h18" />
+        <path d="M8 6V4h8v2" />
+        <path d="M19 6l-1 14H6L5 6" />
+        <path d="M10 11v5" />
+        <path d="M14 11v5" />
+      </svg>`
+    : `<svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </svg>`;
+  return button;
+}
+
+function sampleAutoCompletionTemplate() {
+  const marker = autoCompletion.placeholder;
+  return `for(int i = 0 ; i < n${marker} ; i++){\n    ${marker}\n}`;
+}
+
+function setAutoCompletionEnabled(enabled) {
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    enabled
+  });
+  scheduleAppSettingsSave();
+}
+
+function setAutoCompletionPairs(enabled) {
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    pairs: enabled
+  });
+  scheduleAppSettingsSave();
+}
+
+function setAutoCompletionPlaceholder(value) {
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    placeholder: value
+  });
+  if (els.autoCompletionPlaceholder && els.autoCompletionPlaceholder.value !== autoCompletion.placeholder) {
+    els.autoCompletionPlaceholder.value = autoCompletion.placeholder;
+  }
+  renderAutoCompletionSettings();
+  scheduleAppSettingsSave();
+}
+
+function updateAutoCompletionRule(trigger, template) {
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    rules: {
+      ...autoCompletion.rules,
+      [trigger]: template
+    }
+  });
+  scheduleAppSettingsSave();
+}
+
+function renameAutoCompletionRule(previousTrigger, nextTrigger) {
+  const cleanTrigger = String(nextTrigger || "").trim();
+  if (!cleanTrigger || /\s/.test(cleanTrigger)) {
+    renderAutoCompletionSettings();
+    return;
+  }
+
+  const rules = { ...autoCompletion.rules };
+  const template = rules[previousTrigger] ?? "";
+  delete rules[previousTrigger];
+  rules[cleanTrigger] = template;
+  autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, rules });
+  renderAutoCompletionSettings();
+  scheduleAppSettingsSave();
+}
+
+function deleteAutoCompletionRule(trigger) {
+  const rules = { ...autoCompletion.rules };
+  delete rules[trigger];
+  autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, rules });
+  renderAutoCompletionSettings();
+  scheduleAppSettingsSave();
+}
+
+function showAutoCompletionDraftRule() {
+  autoCompletionDraftOpen = true;
+  renderAutoCompletionSettings();
+}
+
+function addAutoCompletionRuleFromInputs(triggerInput, templateInput) {
+  const trigger = String(triggerInput?.value || "").trim();
+  const template = String(templateInput?.value || "");
+  if (trigger && /\s/.test(trigger)) {
+    triggerInput?.classList.add("is-invalid");
+    return;
+  }
+  if (!trigger && !template.trim()) return;
+  if (!trigger || !template.trim()) {
+    triggerInput?.classList.remove("is-invalid");
+    return;
+  }
+
+  triggerInput?.classList.remove("is-invalid");
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    rules: {
+      ...autoCompletion.rules,
+      [trigger]: template
+    }
+  });
+  autoCompletionDraftOpen = false;
+  renderAutoCompletionSettings();
+  scheduleAppSettingsSave();
 }
 
 function scheduleAppSettingsSave() {
@@ -313,6 +553,10 @@ function boot() {
   });
   els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
   els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
+  els.autoCompletionEnabled?.addEventListener("change", () => setAutoCompletionEnabled(els.autoCompletionEnabled.checked));
+  els.autoCompletionPairs?.addEventListener("change", () => setAutoCompletionPairs(els.autoCompletionPairs.checked));
+  els.autoCompletionPlaceholder?.addEventListener("change", () => setAutoCompletionPlaceholder(els.autoCompletionPlaceholder.value));
+  els.autoCompletionCreateRuleBtn?.addEventListener("click", showAutoCompletionDraftRule);
   els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
@@ -347,10 +591,12 @@ function boot() {
   applyWorkspaceLayout();
   setEditorFontSize(editorFontSize);
   setEditorFontFamily(editorFontFamily);
+  renderAutoCompletionSettings();
   els.quickLanguage.value = els.language.value;
   setCodeforcesHandle(codeforcesHandle);
   loadCodeforcesProfile();
   codeEditor?.on("change", handleEditorChange);
+  codeEditor?.on("inputRead", handleEditorInputRead);
   updateEditorActionButton();
   updateEditorEmptyState();
   loadSavedContestList();
@@ -576,6 +822,7 @@ function initCodeEditor() {
     mode: "text/x-c++src"
   });
   codeEditor.setSize("100%", "100%");
+  codeEditor.on("keydown", handleEditorKeyDown);
 }
 
 function codeMirrorOptions() {
@@ -590,6 +837,7 @@ function codeMirrorOptions() {
     viewportMargin: Infinity,
     extraKeys: {
       Tab(cm) {
+        if (moveToNextSnippetStop(cm)) return;
         if (cm.somethingSelected()) {
           cm.indentSelection("add");
         } else {
@@ -598,6 +846,153 @@ function codeMirrorOptions() {
       }
     }
   };
+}
+
+function handleEditorKeyDown(cm, event) {
+  if (!autoCompletion.enabled || cm.getOption("readOnly")) return;
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+
+  const pairs = {
+    "(": ")",
+    "[": "]",
+    "{": "}",
+    "\"": "\"",
+    "'": "'"
+  };
+  const closing = new Set(Object.values(pairs));
+
+  if (autoCompletion.pairs && closing.has(event.key) && !cm.somethingSelected()) {
+    const cursor = cm.getCursor();
+    if (cm.getRange(cursor, { line: cursor.line, ch: cursor.ch + 1 }) === event.key) {
+      event.preventDefault();
+      cm.setCursor({ line: cursor.line, ch: cursor.ch + 1 });
+    }
+    return;
+  }
+
+  if (autoCompletion.pairs && pairs[event.key]) {
+    event.preventDefault();
+    insertPair(cm, event.key, pairs[event.key]);
+    return;
+  }
+
+  if (event.key === "Backspace" && autoCompletion.pairs && !cm.somethingSelected()) {
+    const cursor = cm.getCursor();
+    if (cursor.ch === 0) return;
+    const previous = cm.getRange({ line: cursor.line, ch: cursor.ch - 1 }, cursor);
+    const next = cm.getRange(cursor, { line: cursor.line, ch: cursor.ch + 1 });
+    if (pairs[previous] === next) {
+      event.preventDefault();
+      cm.replaceRange("", { line: cursor.line, ch: cursor.ch - 1 }, { line: cursor.line, ch: cursor.ch + 1 });
+    }
+  }
+}
+
+function insertPair(cm, open, close) {
+  const selections = cm.listSelections();
+  if (cm.somethingSelected()) {
+    cm.operation(() => {
+      selections.forEach((selection) => {
+        const from = selection.from();
+        const to = selection.to();
+        const selected = cm.getRange(from, to);
+        cm.replaceRange(`${open}${selected}${close}`, from, to, "+pair");
+      });
+    });
+    return;
+  }
+
+  const cursor = cm.getCursor();
+  cm.replaceRange(`${open}${close}`, cursor, cursor, "+pair");
+  cm.setCursor({ line: cursor.line, ch: cursor.ch + open.length });
+}
+
+function handleEditorInputRead(cm, change) {
+  if (!autoCompletion.enabled || cm.getOption("readOnly")) return;
+  if (!change.origin || !change.origin.startsWith("+input")) return;
+  if (change.text.join("\n").length !== 1) return;
+  expandSnippetAtCursor(cm);
+}
+
+function expandSnippetAtCursor(cm) {
+  const cursor = cm.getCursor();
+  const lineBeforeCursor = cm.getLine(cursor.line).slice(0, cursor.ch);
+  const trigger = Object.keys(autoCompletion.rules)
+    .filter((candidate) => lineBeforeCursor.endsWith(candidate))
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (!trigger) return;
+  const triggerStart = cursor.ch - trigger.length;
+  const beforeTrigger = triggerStart > 0 ? lineBeforeCursor[triggerStart - 1] : "";
+  if (beforeTrigger && /[A-Za-z0-9_]/.test(beforeTrigger)) return;
+
+  const snippet = parseSnippetTemplate(autoCompletion.rules[trigger]);
+  const from = { line: cursor.line, ch: triggerStart };
+  cm.operation(() => {
+    clearSnippetSession();
+    cm.replaceRange(snippet.text, from, cursor, "+completion");
+    const positions = snippet.stops.map((offset) => positionFromTextOffset(snippet.text, offset, from));
+    snippetSession = positions.length ? {
+      bookmarks: positions.map((position) => cm.setBookmark(position)),
+      index: 0
+    } : null;
+    if (positions.length) {
+      cm.setCursor(positions[0]);
+    } else {
+      cm.setCursor(positionFromTextOffset(snippet.text, snippet.text.length, from));
+    }
+  });
+}
+
+function parseSnippetTemplate(template) {
+  const raw = String(template ?? "");
+  const placeholder = cleanSnippetPlaceholder(autoCompletion.placeholder);
+  const stops = [];
+  let text = "";
+  let index = 0;
+
+  while (index < raw.length) {
+    const markerIndex = raw.indexOf(placeholder, index);
+    if (markerIndex === -1) {
+      text += raw.slice(index);
+      break;
+    }
+    text += raw.slice(index, markerIndex);
+    stops.push(text.length);
+    index = markerIndex + placeholder.length;
+  }
+
+  return { text, stops };
+}
+
+function positionFromTextOffset(text, offset, from) {
+  const before = text.slice(0, offset).split("\n");
+  if (before.length === 1) return { line: from.line, ch: from.ch + before[0].length };
+  return {
+    line: from.line + before.length - 1,
+    ch: before[before.length - 1].length
+  };
+}
+
+function moveToNextSnippetStop(cm) {
+  if (!snippetSession?.bookmarks?.length) return false;
+  if (snippetSession.index >= snippetSession.bookmarks.length - 1) {
+    clearSnippetSession();
+    return false;
+  }
+  snippetSession.index += 1;
+  const position = snippetSession.bookmarks[snippetSession.index].find();
+  if (!position) {
+    clearSnippetSession();
+    return false;
+  }
+  cm.setCursor(position);
+  return true;
+}
+
+function clearSnippetSession() {
+  snippetSession?.bookmarks?.forEach((bookmark) => bookmark.clear());
+  snippetSession = null;
 }
 
 function getEditorCode() {
@@ -723,7 +1118,7 @@ function openTemplateSettingsFile(view) {
 }
 
 function switchSettingsTab(tabName) {
-  const target = ["profile", "appearance", "editor", "templates"].includes(tabName) ? tabName : "profile";
+  const target = ["profile", "appearance", "editor", "templates", "autocomplete"].includes(tabName) ? tabName : "profile";
   els.settingsTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.settingsTab === target);
   });
@@ -731,6 +1126,7 @@ function switchSettingsTab(tabName) {
   els.editorSettings.hidden = target !== "editor";
   els.profileSettings.hidden = target !== "profile";
   els.templateSettings.hidden = target !== "templates";
+  els.autoCompletionSettings.hidden = target !== "autocomplete";
 }
 
 function applyAppearance() {

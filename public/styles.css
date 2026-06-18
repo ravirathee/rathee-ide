@@ -1711,7 +1711,7 @@ textarea,
   z-index: 80;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 42px 32px;
   background: var(--scrim);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
@@ -1723,13 +1723,14 @@ textarea,
 
 .settings-modal {
   display: grid;
-  grid-template-columns: 172px minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   grid-template-areas:
     "head head"
     "nav panel";
-  width: min(680px, calc(100vw - 32px));
-  min-height: 360px;
+  width: min(1240px, calc(100vw - 64px));
+  height: min(760px, calc(100vh - 84px));
+  min-height: 460px;
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
@@ -1773,7 +1774,8 @@ textarea,
   display: grid;
   grid-template-rows: 1fr;
   min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-head {
@@ -1797,7 +1799,9 @@ textarea,
   display: grid;
   align-content: start;
   gap: 10px;
-  padding: 15px;
+  padding: 18px 28px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .settings-content[hidden] {
@@ -1813,6 +1817,26 @@ textarea,
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-2);
+}
+
+#profileSettings .setting-row {
+  width: min(620px, 100%);
+}
+
+#autoCompletionSettings {
+  padding-left: 34px;
+  padding-right: 34px;
+}
+
+.autocomplete-compact-row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.autocomplete-compact-row select,
+.autocomplete-compact-row input[type="text"],
+.autocomplete-compact-row .setting-toggle {
+  min-height: 30px;
 }
 
 .setting-row--stack {
@@ -1835,9 +1859,9 @@ textarea,
 }
 
 .setting-row select,
-.setting-row input[type="text"] {
+.setting-row input[type="text"],
+.settings-codearea {
   width: 100%;
-  min-height: 36px;
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -1845,11 +1869,198 @@ textarea,
   background: var(--panel-solid);
 }
 
+.setting-row select,
+.setting-row input[type="text"] {
+  min-height: 36px;
+}
+
+.settings-codearea {
+  min-height: 96px;
+  padding: 10px 11px;
+  resize: vertical;
+  font-family: var(--editor-font-family);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
 .setting-row select:focus,
-.setting-row input[type="text"]:focus {
+.setting-row input[type="text"]:focus,
+.settings-codearea:focus {
   outline: 2px solid rgba(var(--accent-rgb), 0.4);
   outline-offset: -1px;
   border-color: transparent;
+}
+
+.settings-codearea.is-invalid {
+  border-color: var(--danger);
+  outline: 2px solid rgba(239, 68, 68, 0.25);
+}
+
+.setting-row input.is-invalid {
+  border-color: var(--danger);
+  outline: 2px solid rgba(239, 68, 68, 0.25);
+}
+
+.setting-checkbox,
+.setting-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.setting-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.setting-toggle input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-slider {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-solid);
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.setting-toggle input:checked + .toggle-slider {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  background: rgba(var(--accent-rgb), 0.22);
+}
+
+.setting-toggle input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: var(--accent);
+}
+
+.setting-toggle input:focus-visible + .toggle-slider {
+  outline: 2px solid rgba(var(--accent-rgb), 0.4);
+  outline-offset: 2px;
+}
+
+.autocomplete-rule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.autocomplete-rules-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.autocomplete-rules-head > span {
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.autocomplete-icon-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.autocomplete-icon-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.autocomplete-rule-card {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.24fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+}
+
+.autocomplete-card-side {
+  display: grid;
+  align-self: stretch;
+  gap: 10px;
+}
+
+.autocomplete-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.autocomplete-rule-card label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.autocomplete-rule-card label > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.autocomplete-rule-card input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.autocomplete-rule-card .settings-codearea {
+  min-height: 108px;
+  resize: both;
+  background: var(--panel-2);
+}
+
+.autocomplete-delete {
+  color: var(--danger);
+}
+
+.autocomplete-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .setting-action-button {
@@ -2445,6 +2656,14 @@ textarea,
    Responsive
    ============================================================ */
 @media (max-width: 820px) {
+  .autocomplete-rule-card {
+    grid-template-columns: 1fr;
+  }
+
+  .autocomplete-delete {
+    justify-self: stretch;
+  }
+
   .app-shell {
     padding: 10px;
   }
@@ -2542,6 +2761,11 @@ textarea,
   .settings-tab {
     flex: 0 0 auto;
     width: auto;
+  }
+
+  .settings-content,
+  #autoCompletionSettings {
+    padding: 15px;
   }
 
   .setting-row {

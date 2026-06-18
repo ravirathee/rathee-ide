@@ -297,6 +297,7 @@
             <button class="settings-tab" data-settings-tab="appearance">Appearance</button>
             <button class="settings-tab" data-settings-tab="editor">Code Editor</button>
             <button class="settings-tab" data-settings-tab="templates">Template Files</button>
+            <button class="settings-tab" data-settings-tab="autocomplete">AutoCompletion Rules</button>
           </aside>
           <div class="settings-panel">
             <div id="appearanceSettings" class="settings-content" hidden>
@@ -377,6 +378,40 @@
                 <span>Template.py</span>
                 <small>Edit default Python code</small>
               </button>
+            </div>
+            <div id="autoCompletionSettings" class="settings-content" hidden>
+              <label class="setting-row autocomplete-compact-row">
+                <span>Auto completion</span>
+                <span class="setting-toggle">
+                  <input id="autoCompletionEnabled" type="checkbox" />
+                  <span class="toggle-slider" aria-hidden="true"></span>
+                  <span>Enabled</span>
+                </span>
+              </label>
+              <label class="setting-row autocomplete-compact-row">
+                <span>Matching pairs</span>
+                <span class="setting-toggle">
+                  <input id="autoCompletionPairs" type="checkbox" />
+                  <span class="toggle-slider" aria-hidden="true"></span>
+                  <span>Insert matching parentheses and quotes</span>
+                </span>
+              </label>
+              <label class="setting-row autocomplete-compact-row">
+                <span>Cursor marker</span>
+                <input id="autoCompletionPlaceholder" type="text" spellcheck="false" autocomplete="off" />
+              </label>
+              <div class="setting-row setting-row--stack">
+                <div class="autocomplete-rules-head">
+                  <span>Rules</span>
+                  <button id="autoCompletionCreateRuleBtn" class="icon-button autocomplete-icon-button" type="button" title="Add rule" aria-label="Add rule">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
+                    </svg>
+                  </button>
+                </div>
+                <div id="autoCompletionRuleList" class="autocomplete-rule-list"></div>
+              </div>
             </div>
           </div>
         </section>
