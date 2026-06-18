@@ -1501,9 +1501,11 @@ function renderHeatmap(heatmap) {
   const weeks = 26; // last ~6 months
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  // Anchor the last column to the current week (Sunday-aligned) so today sits
+  // at the right edge, then step back `weeks - 1` columns for the start.
   const start = new Date(today);
-  start.setDate(start.getDate() - (weeks * 7 - 1));
-  start.setDate(start.getDate() - start.getDay()); // align to Sunday
+  start.setDate(today.getDate() - today.getDay()); // Sunday of the current week
+  start.setDate(start.getDate() - (weeks - 1) * 7);
 
   let total = 0;
   for (let w = 0; w < weeks; w++) {
