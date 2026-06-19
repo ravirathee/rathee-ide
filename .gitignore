@@ -21,3 +21,5 @@ workspace/input.txt
 workspace/output.txt
 workspace/IOFiles/*
 !workspace/IOFiles/.gitkeep
+!workspace/IOFiles/input.txt
+!workspace/IOFiles/output.txt

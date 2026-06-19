@@ -9,10 +9,10 @@
 
 :root {
   /* Scale the whole UI down a touch (≈ Chrome 90% zoom) so it reads smaller
-     and more spaced out. Adjust --ui-zoom to taste; .app-shell divides its
-     100vh height by the same value so the shell still fills the viewport. */
+     and more spaced out. Applied as a transform on .app-shell (not `zoom`) so
+     CodeMirror keeps a 1:1 internal coordinate space and the caret stays
+     aligned. Adjust --ui-zoom to taste. */
   --ui-zoom: 0.9;
-  zoom: var(--ui-zoom);
 
   /* shape + motion + typography (shared across all themes) */
   --radius-sm: 10px;
@@ -133,6 +133,14 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  /* The app shell is scaled with a transform whose pre-scale layout box is
+     larger than the viewport; clip the overflow so it doesn't add scrollbars. */
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -185,9 +193,12 @@ textarea {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
-  /* Compensate for the root `zoom`: a plain 100vh would render at 90% of the
-     screen and leave a gap below. Divide by the zoom factor so the shell
-     fills the viewport. */
+  /* Scale the whole UI by --ui-zoom via a transform. The pre-scale layout box
+     is sized up by 1/zoom so that, once scaled, it fills the viewport exactly
+     (no gap, no scrollbars — body clips the overflow). */
+  transform-origin: top left;
+  transform: scale(var(--ui-zoom));
+  width: calc(100% / var(--ui-zoom));
   height: calc(100vh / var(--ui-zoom));
   padding: 16px;
 }

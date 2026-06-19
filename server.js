@@ -1002,8 +1002,15 @@ const debugSessions = new Map();
 let debugSessionSeq = 0;
 const debugIdleMs = 5 * 60 * 1000;
 
-async function startDebugSession({ code, input = "", breakpoints = [] }) {
+async function startDebugSession({ language = "cpp", code, input = "", breakpoints = [] }) {
   stopAllDebugSessions();
+  if (language === "python") {
+    return startPythonDebugSession({ code, input, breakpoints });
+  }
+  return startCppDebugSession({ code, input, breakpoints });
+}
+
+async function startCppDebugSession({ code, input = "", breakpoints = [] }) {
   const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-debug-"));
   const source = path.join(runDir, "main.cpp");
   const binary = path.join(runDir, "main.out");
@@ -1043,6 +1050,7 @@ async function startDebugSession({ code, input = "", breakpoints = [] }) {
     const id = `dbg-${++debugSessionSeq}`;
     const session = {
       id,
+      kind: "lldb",
       child,
       runDir,
       source,
@@ -1059,7 +1067,7 @@ async function startDebugSession({ code, input = "", breakpoints = [] }) {
     };
     debugSessions.set(id, session);
 
-    child.stdout.on("data", (chunk) => handleLldbData(session, chunk.toString()));
+    child.stdout.on("data", (chunk) => handleDebugData(session, chunk.toString()));
     child.stderr.on("data", (chunk) => { session.stderr += chunk.toString(); });
     child.on("error", () => { session.finished = true; });
 
@@ -1100,15 +1108,10 @@ async function stepDebugSession({ sessionId, action }) {
   }
   if (session.finished) {
     const programOutput = await readProgramOutput(session);
-    return { sessionId, state: "exited", exitStatus: 0, programOutput, message: "Program already finished." };
+    return { sessionId, state: "exited", exitStatus: session.exitCode || 0, programOutput, message: "Program already finished." };
   }
 
-  const command = {
-    over: "thread step-over",
-    in: "thread step-in",
-    out: "thread step-out",
-    continue: "process continue"
-  }[action];
+  const command = stepCommandFor(session.kind, action);
   if (!command) {
     return { sessionId, state: "error", message: "Unknown debug action." };
   }
@@ -1116,7 +1119,7 @@ async function stepDebugSession({ sessionId, action }) {
   try {
     let state;
     if (action === "continue") {
-      await sendLldbCommand(session, command);
+      await sendDebugCommand(session, command);
       state = await probeDebugState(session);
     } else {
       // A single source line can map to several line-table rows (e.g. a line
@@ -1127,7 +1130,7 @@ async function stepDebugSession({ sessionId, action }) {
       const prevDepth = session.lastDepth;
       let guard = 0;
       do {
-        await sendLldbCommand(session, command);
+        await sendDebugCommand(session, command);
         state = await probeDebugState(session);
         guard += 1;
       } while (
@@ -1139,6 +1142,20 @@ async function stepDebugSession({ sessionId, action }) {
         guard < 64
       );
     }
+
+    // Python stepping can land outside the user's file: "Step In" descends into
+    // builtins/library code (e.g. input()), and an uncaught exception parks pdb
+    // in its own machinery. Either way, step back out until we're in main.py
+    // (or the program ends), mirroring how the C++ debugger skips non-user code.
+    if (session.kind === "pdb" && action !== "continue") {
+      let guard = 0;
+      while (state.state === "stopped" && state.inUserCode === false && guard < 64) {
+        await sendDebugCommand(session, "return");
+        state = await probeDebugState(session);
+        guard += 1;
+      }
+    }
+
     rememberDebugPosition(session, state);
     finalizeDebugState(session, state);
     return { sessionId, ...state };
@@ -1161,7 +1178,29 @@ function finalizeDebugState(session, state) {
   }
 }
 
-async function probeDebugState(session) {
+function stepCommandFor(kind, action) {
+  if (kind === "pdb") {
+    return { over: "next", in: "step", out: "return", continue: "continue" }[action];
+  }
+  return {
+    over: "thread step-over",
+    in: "thread step-in",
+    out: "thread step-out",
+    continue: "process continue"
+  }[action];
+}
+
+function sendDebugCommand(session, command) {
+  return session.kind === "pdb"
+    ? sendPdbCommand(session, command)
+    : sendLldbCommand(session, command);
+}
+
+function probeDebugState(session) {
+  return session.kind === "pdb" ? probePythonState(session) : probeLldbState(session);
+}
+
+async function probeLldbState(session) {
   const status = await sendLldbCommand(session, "process status");
   const exitMatch = status.match(/exited with status\s*=\s*(-?\d+)/i);
   if (exitMatch || /is not (?:being run|currently being run)/i.test(status)) {
@@ -1224,16 +1263,32 @@ async function readProgramOutput(session) {
   return text;
 }
 
-function handleLldbData(session, text) {
-  if (!session.pending) return;
-  session.pending.chunks += text;
-  const idx = session.pending.chunks.indexOf(session.pending.marker);
-  if (idx === -1) return;
-  const raw = session.pending.chunks.slice(0, idx);
+function handleDebugData(session, text) {
   const pending = session.pending;
+  if (!pending) return;
+  pending.chunks += text;
+  if (session.kind === "pdb") {
+    // pdb prints the "(Pdb) " prompt and then blocks waiting for the next
+    // command, so a trailing prompt marks the end of this command's output.
+    const match = /\(Pdb\)\s*$/.exec(pending.chunks);
+    if (!match) return;
+    finishPending(session, pending.chunks.slice(0, match.index));
+  } else {
+    const idx = pending.chunks.indexOf(pending.marker);
+    if (idx === -1) return;
+    finishPending(session, pending.chunks.slice(0, idx));
+  }
+}
+
+function finishPending(session, raw) {
+  const pending = session.pending;
+  if (!pending) return;
   session.pending = null;
   clearTimeout(pending.timer);
-  pending.resolve(cleanLldbOutput(raw, pending.command));
+  const output = session.kind === "pdb"
+    ? cleanPdbOutput(raw)
+    : cleanLldbOutput(raw, pending.command);
+  pending.resolve(output);
 }
 
 function sendLldbCommand(session, command, timeoutMs = runTimeoutMs) {
@@ -1274,6 +1329,279 @@ function cleanLldbOutput(text, command) {
     })
     .join("\n")
     .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Python (pdb) interactive debug sessions.
+// A bootstrap launches the target under pdb, but redirects the *program's*
+// stdin/stdout/stderr to files while pdb itself keeps talking over the real
+// pipes. That keeps the command channel clean: the child's stdout only ever
+// carries pdb output, terminated by the "(Pdb) " prompt.
+// ---------------------------------------------------------------------------
+
+// NOTE: pdb._runscript calls __main__.__dict__.clear(), which wipes any
+// module-level names this bootstrap defined. Everything therefore lives inside
+// _main() with local imports so the references survive into the finally block.
+const pythonDebugBootstrap = `def _main():
+    import sys, pdb, traceback
+    target, in_path, out_path, err_path = sys.argv[1:5]
+    dbg = pdb.Pdb(stdin=sys.__stdin__, stdout=sys.__stdout__)
+    dbg.use_rawinput = 0
+    dbg.prompt = "(Pdb) "
+    prog_in = open(in_path, "r")
+    prog_out = open(out_path, "w", buffering=1)
+    prog_err = open(err_path, "w", buffering=1)
+    sys.stdin = prog_in
+    sys.stdout = prog_out
+    sys.stderr = prog_err
+    sys.argv = [target]
+    code = 0
+    try:
+        dbg._runscript(target)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code in (None, "") else 1)
+    except BaseException:
+        traceback.print_exc(file=prog_err)
+        code = 1
+    finally:
+        try:
+            prog_out.flush()
+            prog_err.flush()
+        except Exception:
+            pass
+    sys.exit(code)
+
+_main()
+`;
+
+async function startPythonDebugSession({ code, input = "", breakpoints = [] }) {
+  const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-debug-py-"));
+  const source = path.join(runDir, "main.py");
+  const bootstrap = path.join(runDir, "__debug_runner.py");
+  const progInput = path.join(runDir, "prog_in.txt");
+  const progOutput = path.join(runDir, "prog_out.txt");
+  const progError = path.join(runDir, "prog_err.txt");
+
+  try {
+    await Promise.all([
+      writeFile(source, String(code ?? ""), "utf8"),
+      writeFile(bootstrap, pythonDebugBootstrap, "utf8"),
+      writeFile(progInput, String(input ?? ""), "utf8"),
+      writeFile(progOutput, "", "utf8"),
+      writeFile(progError, "", "utf8")
+    ]);
+    await mkdir(ioFilesDir, { recursive: true });
+    await writeFile(inputFilePath, String(input ?? ""), "utf8");
+    await writeFile(outputFilePath, "", "utf8");
+
+    // Syntax-check up front, mirroring the C++ compile step.
+    const check = await runProcess(
+      "python3",
+      ["-c", "import py_compile, sys; py_compile.compile(sys.argv[1], doraise=True)", source],
+      { cwd: runDir, timeoutMs: runTimeoutMs }
+    );
+    if (check.code !== 0 || check.timedOut) {
+      await rm(runDir, { recursive: true, force: true });
+      return {
+        state: "compile_error",
+        message: check.timedOut ? "Compilation timed out." : (check.stderr || check.stdout || "Syntax error.")
+      };
+    }
+
+    const child = spawn("python3", ["-u", bootstrap, source, progInput, progOutput, progError], {
+      cwd: runDir,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const id = `dbg-${++debugSessionSeq}`;
+    const session = {
+      id,
+      kind: "pdb",
+      child,
+      runDir,
+      source,
+      progInput,
+      progOutput,
+      progError,
+      breakpoints: normalizeBreakpoints(breakpoints),
+      pending: null,
+      stderr: "",
+      finished: false,
+      exitCode: null,
+      idleTimer: null,
+      lastLine: null,
+      lastDepth: null
+    };
+    debugSessions.set(id, session);
+
+    child.stdout.on("data", (chunk) => handleDebugData(session, chunk.toString()));
+    child.stderr.on("data", (chunk) => { session.stderr += chunk.toString(); });
+    child.on("error", () => { session.finished = true; });
+    child.on("close", (codeNum) => {
+      session.finished = true;
+      session.exitCode = typeof codeNum === "number" ? codeNum : (session.exitCode || 0);
+      if (session.pending) finishPending(session, session.pending.chunks);
+    });
+
+    // pdb stops just before the first line runs; wait for that initial prompt.
+    await sendPdbCommand(session, null);
+    for (const line of session.breakpoints) {
+      await sendPdbCommand(session, `break ${line}`);
+    }
+    if (session.breakpoints.length && !session.finished) {
+      await sendPdbCommand(session, "continue");
+    }
+
+    const state = await probeDebugState(session);
+    rememberDebugPosition(session, state);
+    finalizeDebugState(session, state);
+    return { sessionId: id, ...state };
+  } catch (error) {
+    await rm(runDir, { recursive: true, force: true });
+    return { state: "error", message: error.message };
+  }
+}
+
+async function probePythonState(session) {
+  if (session.finished) {
+    const programOutput = await readProgramOutput(session);
+    const exitStatus = session.exitCode || 0;
+    let message = exitStatus ? `Program exited with status ${exitStatus}.` : "Program finished.";
+    if (exitStatus) {
+      const traceback = cleanPythonTraceback(await readFileSafe(session.progError));
+      if (traceback) message = `Python traceback\n${traceback}`;
+    }
+    return { state: "exited", exitStatus, programOutput, message };
+  }
+
+  const where = await sendPdbCommand(session, "where");
+  if (session.finished) return probePythonState(session);
+  const { line, frameDepth, callStack, inUserCode } = parsePdbWhere(where);
+  const locals = await collectPdbLocals(session);
+  const programOutput = await readProgramOutput(session);
+
+  return {
+    state: "stopped",
+    file: "main.py",
+    line,
+    frameDepth,
+    inUserCode,
+    stopReason: "",
+    locals: locals || "No local variables in this frame.",
+    callStack: callStack || "No call stack available.",
+    programOutput
+  };
+}
+
+// pdb `where` lists frames oldest-first with the current one marked "> ".
+// Keep only the user's main.py frames and number them current-first (#0).
+function parsePdbWhere(text) {
+  const frames = [];
+  let currentLine = null;
+  let inUserCode = false;
+  for (const line of String(text || "").split("\n")) {
+    // The current frame at a "--Return--" stop ends with "func()->value", so
+    // allow an optional return-value suffix after the parentheses.
+    const tail = /\((\d+)\)([^()]*)\(\)(?:->.*)?\s*$/.exec(line);
+    if (!tail) continue;
+    const head = /^(\s*>)?\s*(.+?)\(\d+\)/.exec(line);
+    const filePath = head ? head[2].trim() : "";
+    if (!/main\.py$/.test(filePath)) continue;
+    const frame = { line: Number(tail[1]), func: (tail[2] || "").trim() || "<module>" };
+    if (/^\s*>/.test(line)) {
+      currentLine = frame.line;
+      inUserCode = true; // the active frame is in the user's file
+    }
+    frames.push(frame);
+  }
+  frames.reverse();
+  if (currentLine == null && frames.length) currentLine = frames[0].line;
+  const callStack = frames
+    .map((f, i) => `frame #${i}: 0x0 main.py\`${f.func} at main.py:${f.line}`)
+    .join("\n");
+  return { line: currentLine, frameDepth: frames.length, callStack, inUserCode };
+}
+
+async function collectPdbLocals(session) {
+  const namesRaw = await sendPdbCommand(
+    session,
+    "p sorted(k for k in list(locals().keys()) if not k.startswith('__'))"
+  );
+  const names = [];
+  const re = /'([^']*)'|"([^"]*)"/g;
+  let match;
+  while ((match = re.exec(namesRaw)) && names.length < 50) {
+    names.push(match[1] != null ? match[1] : match[2]);
+  }
+
+  const lines = [];
+  for (const name of names) {
+    if (!/^[A-Za-z_]\w*$/.test(name)) continue;
+    const type = (await sendPdbCommand(session, `p type(${name}).__name__`)).replace(/^['"]|['"]$/g, "").trim();
+    const value = (await sendPdbCommand(session, `p ${name}`)).trim();
+    lines.push(`(${type}) ${name} = ${value}`);
+  }
+  return lines.join("\n");
+}
+
+function sendPdbCommand(session, command) {
+  return new Promise((resolve, reject) => {
+    if (session.finished || !session.child || session.child.killed) {
+      resolve("");
+      return;
+    }
+    const pending = { kind: "pdb", chunks: "", resolve, reject, timer: null };
+    pending.timer = setTimeout(() => {
+      if (session.pending === pending) session.pending = null;
+      reject(new Error("Debugger command timed out (possible infinite loop)."));
+    }, runTimeoutMs);
+    session.pending = pending;
+    if (command != null) {
+      try {
+        session.child.stdin.write(`${command}\n`);
+      } catch (error) {
+        clearTimeout(pending.timer);
+        session.pending = null;
+        reject(error);
+      }
+    }
+  });
+}
+
+function cleanPdbOutput(text) {
+  return String(text).replace(/\(Pdb\)\s?/g, "").replace(/\r/g, "").trim();
+}
+
+async function readFileSafe(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+// Drop the bootstrap/pdb/bdb frames from a Python traceback and rewrite the
+// temp path so only the user's main.py frames remain.
+function cleanPythonTraceback(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const fileMatch = /^\s*File "(.+?)", line \d+/.exec(lines[i]);
+    if (fileMatch) {
+      const file = fileMatch[1];
+      if (/__debug_runner\.py$|[\\/](?:pdb|bdb)\.py$|^<string>$/.test(file)) {
+        // Skip the indented source line that follows a frame, but only if it
+        // is one (e.g. "<string>" frames have none — don't eat the next frame).
+        const next = lines[i + 1];
+        if (next != null && /^\s/.test(next) && !/^\s*File "/.test(next)) i += 1;
+        continue;
+      }
+      out.push(lines[i].replace(/File ".*main\.py"/, 'File "main.py"'));
+      continue;
+    }
+    if (/^During handling of the above exception/.test(lines[i].trim())) continue;
+    out.push(lines[i]);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function touchDebugSession(session) {

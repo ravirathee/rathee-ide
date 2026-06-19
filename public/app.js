@@ -1105,7 +1105,7 @@ function renderEditorBreakpoints() {
 }
 
 function activeBreakpointLines() {
-  if (els.language.value !== "cpp" || editorView !== "code") return [];
+  if (editorView !== "code") return [];
   return Array.from(currentBreakpoints())
     .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber > 0)
     .sort((a, b) => a - b);
@@ -1274,6 +1274,8 @@ function applyUiZoom() {
   const percent = Math.round(uiZoom * 100);
   if (els.uiZoomRange) els.uiZoomRange.value = String(percent);
   if (els.uiZoomValue) els.uiZoomValue.textContent = `${percent}%`;
+  // Re-measure so the caret height matches the line box after a zoom change.
+  requestAnimationFrame(() => codeEditor?.refresh());
 }
 
 function setUiZoom(percent) {
@@ -2649,6 +2651,7 @@ async function submit(mode) {
 
   if (effectiveMode === "debug") {
     await startDebugSession({
+      language: els.language.value,
       code: getRunCode(),
       input: els.input.value,
       breakpoints: breakpointLines,
@@ -2721,6 +2724,7 @@ async function startDebugSession(params) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        language: params.language || "cpp",
         code: params.code,
         input: params.input,
         breakpoints: params.breakpoints || []
