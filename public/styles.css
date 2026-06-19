@@ -9,10 +9,12 @@
 
 :root {
   /* Scale the whole UI down a touch (≈ Chrome 90% zoom) so it reads smaller
-     and more spaced out. Applied as a transform on .app-shell (not `zoom`) so
-     CodeMirror keeps a 1:1 internal coordinate space and the caret stays
-     aligned. Adjust --ui-zoom to taste. */
+     and more spaced out. The app shell is scaled with `zoom`; the code editor
+     is counter-scaled back to a net 1:1 so CodeMirror's caret stays aligned
+     (it can't measure correctly under a fractional scale). Adjust --ui-zoom
+     to taste; --editor-counter-zoom is kept as 1/zoom by the app. */
   --ui-zoom: 0.9;
+  --editor-counter-zoom: 1.111111;
 
   /* shape + motion + typography (shared across all themes) */
   --radius-sm: 10px;
@@ -133,14 +135,6 @@
   box-sizing: border-box;
 }
 
-html,
-body {
-  /* The app shell is scaled with a transform whose pre-scale layout box is
-     larger than the viewport; clip the overflow so it doesn't add scrollbars. */
-  height: 100%;
-  overflow: hidden;
-}
-
 body {
   margin: 0;
   min-height: 100vh;
@@ -193,12 +187,10 @@ textarea {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
-  /* Scale the whole UI by --ui-zoom via a transform. The pre-scale layout box
-     is sized up by 1/zoom so that, once scaled, it fills the viewport exactly
-     (no gap, no scrollbars — body clips the overflow). */
-  transform-origin: top left;
-  transform: scale(var(--ui-zoom));
-  width: calc(100% / var(--ui-zoom));
+  /* Scale the whole UI with `zoom`. 100vh is divided by the zoom so the shell
+     still fills the viewport after scaling (the editor is counter-scaled —
+     see .CodeMirror). */
+  zoom: var(--ui-zoom);
   height: calc(100vh / var(--ui-zoom));
   padding: 16px;
 }
@@ -284,6 +276,21 @@ h1 {
 .statusbar {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+/* Stylish cursive flourish on the "for CodeForces" tagline — the script font
+   carries its own slant, so keep the CSS upright to avoid over-italicising. */
+.brand-cursive {
+  font-family: "Snell Roundhand", "Segoe Script", "Brush Script MT", cursive;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: 0.2px;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent);
 }
 
 .contest-wrap span,
@@ -1595,11 +1602,20 @@ textarea,
   font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   line-height: 1.55;
+  /* The app shell is scaled with `zoom` (≈0.9). Counter-scale the editor back
+     to a net 1:1 so CodeMirror's caret/clicks stay aligned. Width and height
+     are pre-multiplied by the page zoom (overriding CodeMirror's inline 100%)
+     so the element still fills its pane after the counter-scale. */
+  zoom: var(--editor-counter-zoom, 1);
+  width: calc(100% * var(--ui-zoom)) !important;
+  height: calc(100% * var(--ui-zoom)) !important;
 }
 
+/* Let the editor share the editor-pane's background so it reads as one
+   surface (no darker box-in-a-box, and any counter-scale seam is invisible). */
 .cm-s-material-darker.CodeMirror,
 .cm-s-neo.CodeMirror {
-  background: var(--editor-bg) !important;
+  background: transparent !important;
   color: var(--text);
 }
 
@@ -1610,8 +1626,8 @@ textarea,
 .cm-s-material-darker .CodeMirror-gutters,
 .cm-s-neo .CodeMirror-gutters,
 .CodeMirror-gutters {
-  background: var(--editor-gutter) !important;
-  border-right: 1px solid var(--line);
+  background: transparent !important;
+  border-right: 1px solid transparent;
 }
 
 .CodeMirror-gutter.breakpoints {

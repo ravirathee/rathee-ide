@@ -1270,6 +1270,7 @@ function clampZoom(value) {
 function applyUiZoom() {
   uiZoom = clampZoom(uiZoom);
   document.documentElement.style.setProperty("--ui-zoom", String(uiZoom));
+  document.documentElement.style.setProperty("--editor-counter-zoom", String(1 / uiZoom));
   localStorage.setItem("rathee.uiZoom", String(uiZoom));
   const percent = Math.round(uiZoom * 100);
   if (els.uiZoomRange) els.uiZoomRange.value = String(percent);
