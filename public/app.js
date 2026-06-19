@@ -182,6 +182,16 @@ let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
 let snippetSession = null;
 let autoCompletionDraftOpen = false;
 const breakpointsByFile = {};
+// Stable per-browser id so the server scopes "stop my previous debug session"
+// to this client and doesn't disturb other users.
+const debugClientId = (() => {
+  let id = localStorage.getItem("rathee.clientId");
+  if (!id) {
+    id = (crypto.randomUUID && crypto.randomUUID()) || `c-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    localStorage.setItem("rathee.clientId", id);
+  }
+  return id;
+})();
 let debugSession = {
   id: null,
   active: false,
@@ -2725,6 +2735,7 @@ async function startDebugSession(params) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        clientId: debugClientId,
         language: params.language || "cpp",
         code: params.code,
         input: params.input,

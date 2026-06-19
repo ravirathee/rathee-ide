@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile, stat, rm, readdir, rename } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, stat, rm, readdir, rename, chmod } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -33,6 +33,107 @@ const port = Number(process.env.PORT || 4173);
 const maxBodyBytes = 1024 * 1024;
 const runTimeoutMs = 8000;
 
+// ---------------------------------------------------------------------------
+// Execution sandbox. When USE_DOCKER=1, every g++/python3/lldb invocation runs
+// inside a disposable, locked-down container instead of on the host, so it is
+// safe to expose publicly. Locally (flag off) everything runs natively for
+// fast iteration. The per-run temp dir is bind-mounted at /work; host paths
+// under it are remapped to container paths.
+// ---------------------------------------------------------------------------
+const useDocker = process.env.USE_DOCKER === "1";
+const runnerImage = process.env.RUNNER_IMAGE || "forge-runner";
+const containerWork = "/work";
+let dockerNameSeq = 0;
+
+function dockerName(prefix) {
+  return `forge-${prefix}-${process.pid}-${++dockerNameSeq}`;
+}
+
+// Map a host path inside `runDir` to its path inside the runner container.
+function execPath(runDir, hostPath) {
+  if (!useDocker || typeof hostPath !== "string" || !hostPath.startsWith(runDir)) {
+    return hostPath;
+  }
+  const rel = path.relative(runDir, hostPath);
+  return rel ? path.posix.join(containerWork, rel.split(path.sep).join("/")) : containerWork;
+}
+
+// Wrap a command so it runs inside the sandbox. The command itself and any args
+// that are host paths under `runDir` are remapped to /work. Returns the command
+// unchanged when USE_DOCKER is off so local dev runs natively.
+function sandbox(command, args, runDir, { name } = {}) {
+  if (!useDocker) return { command, args };
+  const flags = [
+    "run", "--rm", "-i",
+    "--network=none",
+    "--memory=256m", "--memory-swap=256m", "--cpus=1", "--pids-limit=128",
+    "--read-only", "--tmpfs", "/tmp:exec,size=64m",
+    "--cap-drop=ALL",
+    "--user", "1000:1000",
+    "-v", `${runDir}:${containerWork}`,
+    "-w", containerWork
+  ];
+  if (command === "lldb") {
+    // lldb needs ptrace to control the inferior; the default seccomp profile
+    // blocks it. Relax seccomp for this one container only — it still has no
+    // network, a read-only/ephemeral FS, and is destroyed on exit.
+    flags.push("--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined");
+  }
+  if (name) flags.push("--name", name);
+  flags.push(runnerImage, execPath(runDir, command), ...args.map((a) => execPath(runDir, a)));
+  return { command: "docker", args: flags };
+}
+
+function killContainer(name) {
+  if (!useDocker || !name) return;
+  try { spawn("docker", ["kill", name], { stdio: "ignore" }); } catch { /* ignore */ }
+}
+
+// Create a per-run temp dir, made group/other-writable when sandboxing so the
+// container's non-root user can write to the bind mount.
+async function createRunDir(prefix) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  if (useDocker) await chmod(dir, 0o777).catch(() => {});
+  return dir;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-user safety: cap total live debug sessions and concurrent runs, and
+// rate-limit the code-executing endpoints per client IP so one visitor can't
+// starve the box or fork-bomb containers.
+// ---------------------------------------------------------------------------
+const maxDebugSessions = Number(process.env.MAX_DEBUG_SESSIONS || 25);
+const maxConcurrentRuns = Number(process.env.MAX_CONCURRENT_RUNS || 20);
+const rateLimitWindowMs = 60 * 1000;
+const rateLimitMax = Number(process.env.RATE_LIMIT_PER_MIN || 30);
+const rateBuckets = new Map();
+let activeRuns = 0;
+
+function clientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return (req.socket && req.socket.remoteAddress) || "unknown";
+}
+
+function rateLimited(ip) {
+  const now = Date.now();
+  let bucket = rateBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + rateLimitWindowMs };
+    rateBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  return bucket.count > rateLimitMax;
+}
+
+// Drop stale rate-limit buckets so the map can't grow unbounded.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(ip);
+  }
+}, rateLimitWindowMs).unref();
+
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -52,12 +153,26 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     if (req.method === "POST" && url.pathname === "/api/run") {
+      if (rateLimited(clientIp(req))) {
+        return sendJson(res, 429, { error: "Too many requests. Please wait a moment and try again." });
+      }
+      if (activeRuns >= maxConcurrentRuns) {
+        return sendJson(res, 503, { error: "The server is busy running other programs. Please retry shortly." });
+      }
       const body = await readJsonBody(req);
-      const result = await executeCode(body);
-      return sendJson(res, 200, result);
+      activeRuns += 1;
+      try {
+        const result = await executeCode(body);
+        return sendJson(res, 200, result);
+      } finally {
+        activeRuns -= 1;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/debug/start") {
+      if (rateLimited(clientIp(req))) {
+        return sendJson(res, 429, { error: "Too many requests. Please wait a moment and try again." });
+      }
       const body = await readJsonBody(req);
       const result = await startDebugSession(body);
       return sendJson(res, 200, result);
@@ -914,7 +1029,7 @@ async function executeCode({ language, code, input = "", mode = "run", breakpoin
   }
 
   const extension = language === "python" ? "py" : "cpp";
-  const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-run-"));
+  const runDir = await createRunDir("rathee-ide-run-");
   const source = path.join(runDir, `main.${extension}`);
   const inputFile = inputFilePath;
   const outputFile = outputFilePath;
@@ -1002,16 +1117,32 @@ const debugSessions = new Map();
 let debugSessionSeq = 0;
 const debugIdleMs = 5 * 60 * 1000;
 
-async function startDebugSession({ language = "cpp", code, input = "", breakpoints = [] }) {
-  stopAllDebugSessions();
-  if (language === "python") {
-    return startPythonDebugSession({ code, input, breakpoints });
+async function startDebugSession({ language = "cpp", code, input = "", breakpoints = [], clientId = "" }) {
+  // End only this client's own previous session (so concurrent users don't
+  // kill each other). With no clientId we fall back to the old single-session
+  // behaviour. A global cap bounds total live sessions.
+  if (clientId) stopClientDebugSessions(clientId);
+  else stopAllDebugSessions();
+
+  if (debugSessions.size >= maxDebugSessions) {
+    return { state: "error", message: "The debugger is at capacity right now. Please try again in a moment." };
   }
-  return startCppDebugSession({ code, input, breakpoints });
+
+  const opts = { code, input, breakpoints, clientId };
+  if (language === "python") {
+    return startPythonDebugSession(opts);
+  }
+  return startCppDebugSession(opts);
 }
 
-async function startCppDebugSession({ code, input = "", breakpoints = [] }) {
-  const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-debug-"));
+function stopClientDebugSessions(clientId) {
+  for (const session of [...debugSessions.values()]) {
+    if (session.clientId === clientId) cleanupDebugSession(session);
+  }
+}
+
+async function startCppDebugSession({ code, input = "", breakpoints = [], clientId = "" }) {
+  const runDir = await createRunDir("rathee-ide-debug-");
   const source = path.join(runDir, "main.cpp");
   const binary = path.join(runDir, "main.out");
   const progInput = path.join(runDir, "prog_in.txt");
@@ -1043,7 +1174,9 @@ async function startCppDebugSession({ code, input = "", breakpoints = [] }) {
       };
     }
 
-    const child = spawn("lldb", ["--no-use-colors", binary], {
+    const containerName = useDocker ? dockerName("lldb") : null;
+    const launched = sandbox("lldb", ["--no-use-colors", binary], runDir, { name: containerName });
+    const child = spawn(launched.command, launched.args, {
       cwd: runDir,
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -1051,7 +1184,9 @@ async function startCppDebugSession({ code, input = "", breakpoints = [] }) {
     const session = {
       id,
       kind: "lldb",
+      clientId,
       child,
+      containerName,
       runDir,
       source,
       binary,
@@ -1088,7 +1223,7 @@ async function startCppDebugSession({ code, input = "", breakpoints = [] }) {
 
     await sendLldbCommand(
       session,
-      `process launch -i "${progInput}" -o "${progOutput}" -e "${progError}"`
+      `process launch -i "${execPath(runDir, progInput)}" -o "${execPath(runDir, progOutput)}" -e "${execPath(runDir, progError)}"`
     );
 
     const state = await probeDebugState(session);
@@ -1374,8 +1509,8 @@ const pythonDebugBootstrap = `def _main():
 _main()
 `;
 
-async function startPythonDebugSession({ code, input = "", breakpoints = [] }) {
-  const runDir = await mkdtemp(path.join(os.tmpdir(), "rathee-ide-debug-py-"));
+async function startPythonDebugSession({ code, input = "", breakpoints = [], clientId = "" }) {
+  const runDir = await createRunDir("rathee-ide-debug-py-");
   const source = path.join(runDir, "main.py");
   const bootstrap = path.join(runDir, "__debug_runner.py");
   const progInput = path.join(runDir, "prog_in.txt");
@@ -1408,7 +1543,14 @@ async function startPythonDebugSession({ code, input = "", breakpoints = [] }) {
       };
     }
 
-    const child = spawn("python3", ["-u", bootstrap, source, progInput, progOutput, progError], {
+    const containerName = useDocker ? dockerName("pdb") : null;
+    const launched = sandbox(
+      "python3",
+      ["-u", bootstrap, source, progInput, progOutput, progError],
+      runDir,
+      { name: containerName }
+    );
+    const child = spawn(launched.command, launched.args, {
       cwd: runDir,
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -1416,7 +1558,9 @@ async function startPythonDebugSession({ code, input = "", breakpoints = [] }) {
     const session = {
       id,
       kind: "pdb",
+      clientId,
       child,
+      containerName,
       runDir,
       source,
       progInput,
@@ -1627,6 +1771,7 @@ function cleanupDebugSession(session) {
   }
   try { session.child.stdin.write("quit\n"); } catch { /* ignore */ }
   try { session.child.kill("SIGKILL"); } catch { /* ignore */ }
+  killContainer(session.containerName);
   rm(session.runDir, { recursive: true, force: true }).catch(() => {});
 }
 
@@ -1743,14 +1888,17 @@ function extractLldbCommandOutput(text, command, nextCommand) {
 }
 
 function runProcess(command, args, { input = "", cwd, timeoutMs }) {
+  const name = useDocker && cwd ? dockerName("run") : null;
+  const launched = name ? sandbox(command, args, cwd, { name }) : { command, args };
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(launched.command, launched.args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
 
     const timer = setTimeout(() => {
       timedOut = true;
+      killContainer(name);
       child.kill("SIGKILL");
     }, timeoutMs);
 
