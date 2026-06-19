@@ -2507,11 +2507,16 @@ function combineCppSource(source) {
 
 function cppRunLineOffset() {
   if (els.language.value !== "cpp" || !activeCppFile) return 0;
+  // Count the lines the header prefix occupies before the user source in
+  // combineCppSource (`<headers>\n\n<stripped source>`). Counting newlines in
+  // the exact prefix keeps this correct whether or not the header is empty,
+  // unlike a fixed +N constant. Off-by-one here shifts breakpoints (and the
+  // current-line highlight) one line away from the line that actually runs.
   const header = cppHeaders.trimEnd();
-  const headerLines = header ? header.split("\n").length : 0;
+  const prefixNewlines = `${header}\n\n`.split("\n").length - 1;
   const activeSource = cppFiles[activeCppFile] || "";
   const strippedPrefixLines = duplicateHeaderPrefixLineCount(activeSource);
-  return headerLines + 2 - strippedPrefixLines;
+  return prefixNewlines - strippedPrefixLines;
 }
 
 function stripDuplicateHeaders(source) {
