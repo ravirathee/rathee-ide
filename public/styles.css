@@ -8,6 +8,12 @@
    ============================================================ */
 
 :root {
+  /* Scale the whole UI down a touch (≈ Chrome 90% zoom) so it reads smaller
+     and more spaced out. Adjust --ui-zoom to taste; .app-shell divides its
+     100vh height by the same value so the shell still fills the viewport. */
+  --ui-zoom: 0.9;
+  zoom: var(--ui-zoom);
+
   /* shape + motion + typography (shared across all themes) */
   --radius-sm: 10px;
   --radius: 14px;
@@ -179,7 +185,10 @@ textarea {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
-  height: 100vh;
+  /* Compensate for the root `zoom`: a plain 100vh would render at 90% of the
+     screen and leave a gap below. Divide by the zoom factor so the shell
+     fills the viewport. */
+  height: calc(100vh / var(--ui-zoom));
   padding: 16px;
 }
 
@@ -1859,6 +1868,107 @@ textarea,
 
 .editor-debug-output {
   background: var(--editor-bg);
+}
+
+/* Structured per-variable debug output (one highlighted row per local). */
+.editor-debug-output.debug-structured {
+  white-space: normal;
+  padding: 6px;
+}
+
+.debug-frame-head {
+  padding: 3px 6px 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+
+.debug-var-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.debug-var-row {
+  display: grid;
+  grid-template-columns: minmax(48px, max-content) minmax(40px, max-content) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border-left: 3px solid rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.1);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+
+.debug-var-row:nth-child(even) {
+  border-left-color: rgba(var(--accent-2-rgb), 0.55);
+  background: rgba(var(--accent-2-rgb), 0.09);
+}
+
+.debug-var-name {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.debug-var-type {
+  color: var(--muted);
+}
+
+.debug-var-value {
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-var-empty {
+  display: block;
+  border-left-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* Call stack frames reuse the highlighted-row look. */
+.debug-frame-row {
+  grid-template-columns: max-content 1fr max-content;
+}
+
+.debug-frame-index {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.debug-frame-func {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-frame-loc {
+  color: var(--muted);
+  justify-self: end;
+}
+
+.zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.zoom-control input[type="range"] {
+  width: 160px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.zoom-value {
+  min-width: 42px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-align: right;
 }
 
 /* ============================================================

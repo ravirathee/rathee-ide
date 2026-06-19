@@ -57,6 +57,8 @@ const els = {
   appearanceSettings: document.querySelector("#appearanceSettings"),
   modeLightBtn: document.querySelector("#modeLightBtn"),
   modeDarkBtn: document.querySelector("#modeDarkBtn"),
+  uiZoomRange: document.querySelector("#uiZoomRange"),
+  uiZoomValue: document.querySelector("#uiZoomValue"),
   themeSwatches: Array.from(document.querySelectorAll(".theme-swatch")),
   modeToggleBtn: document.querySelector("#modeToggleBtn"),
   modeIcon: document.querySelector("#modeToggleBtn .mode-icon"),
@@ -169,6 +171,7 @@ let appearanceMode = APPEARANCE_MODES.includes(localStorage.getItem("rathee.appe
 let appearanceTheme = APPEARANCE_THEMES.includes(localStorage.getItem("rathee.appearanceTheme"))
   ? localStorage.getItem("rathee.appearanceTheme")
   : "aurora";
+let uiZoom = clampZoom(Number(localStorage.getItem("rathee.uiZoom")) || 0.9);
 let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
@@ -226,6 +229,7 @@ function applyAppSettings(settings) {
   const appearance = settings.appearance || {};
   if (APPEARANCE_MODES.includes(appearance.mode)) appearanceMode = appearance.mode;
   if (APPEARANCE_THEMES.includes(appearance.theme)) appearanceTheme = appearance.theme;
+  if (Number.isFinite(Number(appearance.zoom))) uiZoom = clampZoom(Number(appearance.zoom));
   autoCompletion = normalizeAutoCompletionSettings(settings.autoCompletion);
 
   const layout = settings.layout || {};
@@ -249,7 +253,8 @@ function currentAppSettings() {
     language: els.language.value,
     appearance: {
       mode: appearanceMode,
-      theme: appearanceTheme
+      theme: appearanceTheme,
+      zoom: uiZoom
     },
     autoCompletion,
     layout: {
@@ -548,6 +553,7 @@ function boot() {
   });
   els.modeLightBtn.addEventListener("click", () => setAppearanceMode("light"));
   els.modeDarkBtn.addEventListener("click", () => setAppearanceMode("dark"));
+  els.uiZoomRange?.addEventListener("input", (event) => setUiZoom(event.target.value));
   els.themeSwatches.forEach((swatch) => {
     swatch.addEventListener("click", () => setAppearanceTheme(swatch.dataset.themeValue));
   });
@@ -1252,6 +1258,28 @@ function applyAppearance() {
   els.themeMenuItems?.forEach((item) => {
     item.classList.toggle("active", item.dataset.themeValue === appearanceTheme);
   });
+  applyUiZoom();
+  requestAnimationFrame(() => codeEditor?.refresh());
+}
+
+function clampZoom(value) {
+  if (!Number.isFinite(value)) return 0.9;
+  return Math.min(1.1, Math.max(0.7, value));
+}
+
+function applyUiZoom() {
+  uiZoom = clampZoom(uiZoom);
+  document.documentElement.style.setProperty("--ui-zoom", String(uiZoom));
+  localStorage.setItem("rathee.uiZoom", String(uiZoom));
+  const percent = Math.round(uiZoom * 100);
+  if (els.uiZoomRange) els.uiZoomRange.value = String(percent);
+  if (els.uiZoomValue) els.uiZoomValue.textContent = `${percent}%`;
+}
+
+function setUiZoom(percent) {
+  uiZoom = clampZoom(Number(percent) / 100);
+  applyUiZoom();
+  scheduleAppSettingsSave();
   requestAnimationFrame(() => codeEditor?.refresh());
 }
 
@@ -2825,18 +2853,8 @@ function applyDebugState(state) {
   debugSession.line = editorLine;
   highlightDebugLine(editorLine);
 
-  const reason = state.stopReason ? `Stopped: ${state.stopReason}` : "Paused";
-  const locationText = editorLine && editorLine > 0
-    ? `${reason}\nLine ${editorLine}`
-    : reason;
-  const debuggerText = [
-    locationText,
-    "",
-    "Variables",
-    state.locals || "No local variables in this frame."
-  ].join("\n");
-  els.debug.textContent = debuggerText;
-  els.callStack.textContent = remapStackLines(state.callStack || "");
+  renderDebugVariables(state, editorLine);
+  renderCallStack(state);
 
   setStatus("Paused", "idle");
   els.meta.textContent = editorLine && editorLine > 0 ? `Paused at line ${editorLine}` : "Paused";
@@ -2850,6 +2868,103 @@ function remapStackLines(stack) {
     const mapped = Number(line) - offset;
     return mapped > 0 ? `main.cpp:${mapped}` : match;
   });
+}
+
+// Render the locals as one highlighted row per variable instead of raw text.
+function renderDebugVariables(state, editorLine) {
+  const reason = state.stopReason ? `Stopped: ${state.stopReason}` : "Paused";
+  const headText = editorLine && editorLine > 0 ? `${reason} · Line ${editorLine}` : reason;
+  const head = `<div class="debug-frame-head">${escapeHtml(headText)}</div>`;
+
+  const vars = parseLldbLocals(state.locals);
+  let rows;
+  if (!vars.length) {
+    rows = `<div class="debug-var-row debug-var-empty">${escapeHtml(state.locals || "No local variables in this frame.")}</div>`;
+  } else {
+    rows = vars.map((v) => (
+      `<div class="debug-var-row">` +
+        `<span class="debug-var-name">${escapeHtml(v.name)}</span>` +
+        `<span class="debug-var-type">${escapeHtml(v.type)}</span>` +
+        `<span class="debug-var-value">${escapeHtml(v.value)}</span>` +
+      `</div>`
+    )).join("");
+  }
+
+  els.debug.classList.add("debug-structured");
+  els.debug.innerHTML = head + `<div class="debug-var-list">${rows}</div>`;
+}
+
+// lldb `frame variable` prints "(type) name = value"; nested members are
+// indented under their parent. Group those continuation lines into the value.
+function parseLldbLocals(text) {
+  const lines = String(text || "").split("\n");
+  const vars = [];
+  let current = null;
+  for (const line of lines) {
+    const match = /^\((.+?)\)\s+(\S+)\s*=\s*([\s\S]*)$/.exec(line);
+    if (match && !/^\s/.test(line)) {
+      current = { type: match[1], name: match[2], value: match[3] };
+      vars.push(current);
+    } else if (current) {
+      current.value += `\n${line.trim()}`;
+    }
+  }
+  return vars.map((v) => ({ ...v, value: v.value.trim() }));
+}
+
+// Render the call stack as one highlighted row per frame, matching the
+// variable rows. Frame line numbers are mapped back to editor coordinates.
+function renderCallStack(state) {
+  const frames = parseCallStack(state.callStack);
+  if (!frames.length) {
+    els.callStack.classList.remove("debug-structured");
+    els.callStack.textContent = remapStackLines(state.callStack || "") || "No call stack available.";
+    return;
+  }
+  const rows = frames.map((f) => (
+    `<div class="debug-var-row debug-frame-row">` +
+      `<span class="debug-frame-index">#${escapeHtml(f.index)}</span>` +
+      `<span class="debug-frame-func">${escapeHtml(f.func)}</span>` +
+      `<span class="debug-frame-loc">${escapeHtml(f.location)}</span>` +
+    `</div>`
+  )).join("");
+  els.callStack.classList.add("debug-structured");
+  els.callStack.innerHTML = `<div class="debug-var-list">${rows}</div>`;
+}
+
+function parseCallStack(text) {
+  const offset = debugSession.lineOffset || 0;
+  const frames = [];
+  for (const line of String(text || "").split("\n")) {
+    const match = /frame #(\d+):\s+0x[0-9a-fA-F]+\s+(.+)$/.exec(line.trim());
+    if (!match) continue;
+    let func = match[2];
+    let location = "";
+    const atIdx = func.indexOf(" at ");
+    if (atIdx !== -1) {
+      location = func.slice(atIdx + 4);
+      func = func.slice(0, atIdx);
+    }
+    const tick = func.lastIndexOf("`"); // strip the "module`" prefix
+    if (tick !== -1) func = func.slice(tick + 1);
+    location = location.replace(/^([^\s:]+):(\d+)(?::\d+)?/, (full, file, ln) => {
+      let n = Number(ln);
+      if (file === "main.cpp" && offset) {
+        const mapped = n - offset;
+        if (mapped > 0) n = mapped;
+      }
+      return `${file}:${n}`;
+    });
+    frames.push({ index: match[1], func, location });
+  }
+  return frames;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function highlightDebugLine(editorLine) {
@@ -2901,6 +3016,8 @@ function showDebug(visible) {
 
 function setDebuggerOutput(text) {
   const { debuggerText, callStackText } = splitDebuggerText(text);
+  els.debug.classList.remove("debug-structured");
+  els.callStack.classList.remove("debug-structured");
   els.debug.textContent = debuggerText;
   els.callStack.textContent = callStackText;
 }
