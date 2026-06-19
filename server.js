@@ -1084,6 +1084,7 @@ async function startDebugSession({ code, input = "", breakpoints = [] }) {
     );
 
     const state = await probeDebugState(session);
+    rememberDebugPosition(session, state);
     finalizeDebugState(session, state);
     return { sessionId: id, ...state };
   } catch (error) {
@@ -1113,14 +1114,43 @@ async function stepDebugSession({ sessionId, action }) {
   }
 
   try {
-    await sendLldbCommand(session, command);
-    const state = await probeDebugState(session);
+    let state;
+    if (action === "continue") {
+      await sendLldbCommand(session, command);
+      state = await probeDebugState(session);
+    } else {
+      // A single source line can map to several line-table rows (e.g. a line
+      // with two statements). Keep stepping while we land back on the exact
+      // same line in the same frame so one "Step" click always advances the
+      // visible line, instead of appearing stuck. Capped to avoid runaway.
+      const prevLine = session.lastLine;
+      const prevDepth = session.lastDepth;
+      let guard = 0;
+      do {
+        await sendLldbCommand(session, command);
+        state = await probeDebugState(session);
+        guard += 1;
+      } while (
+        state.state === "stopped" &&
+        state.line != null &&
+        prevLine != null &&
+        state.line === prevLine &&
+        state.frameDepth === prevDepth &&
+        guard < 64
+      );
+    }
+    rememberDebugPosition(session, state);
     finalizeDebugState(session, state);
     return { sessionId, ...state };
   } catch (error) {
     stopDebugSession(sessionId);
     return { sessionId, state: "error", message: error.message };
   }
+}
+
+function rememberDebugPosition(session, state) {
+  session.lastLine = state.state === "stopped" ? state.line : null;
+  session.lastDepth = state.state === "stopped" ? state.frameDepth : null;
 }
 
 function finalizeDebugState(session, state) {
@@ -1159,6 +1189,7 @@ async function probeDebugState(session) {
     state: "stopped",
     file: locMatch ? locMatch[1] : "main.cpp",
     line: locMatch ? Number(locMatch[2]) : null,
+    frameDepth: (stack.match(/frame #/g) || []).length,
     stopReason: reasonMatch ? reasonMatch[1].trim() : "",
     locals: filterLldbLocals(locals),
     callStack: filterLldbStack(stack),
