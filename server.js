@@ -89,10 +89,17 @@ function killContainer(name) {
   try { spawn("docker", ["kill", name], { stdio: "ignore" }); } catch { /* ignore */ }
 }
 
+// Base directory for per-run temp dirs. Defaults to the OS temp dir, but can be
+// overridden — needed under Colima/Lima, whose VM only bind-mounts certain host
+// paths (e.g. $HOME), not macOS's /var/folders temp dir. Set RUN_DIR_BASE to a
+// shared path there so the runner container can see the source files.
+const runDirBase = process.env.RUN_DIR_BASE || os.tmpdir();
+
 // Create a per-run temp dir, made group/other-writable when sandboxing so the
 // container's non-root user can write to the bind mount.
 async function createRunDir(prefix) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  await mkdir(runDirBase, { recursive: true }).catch(() => {});
+  const dir = await mkdtemp(path.join(runDirBase, prefix));
   if (useDocker) await chmod(dir, 0o777).catch(() => {});
   return dir;
 }
