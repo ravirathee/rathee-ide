@@ -6,7 +6,13 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { initStore, dbReady, upsertUser, getUserById } from "./store.js";
+import {
+  initStore, dbReady, upsertUser, getUserById,
+  listFiles, saveFile, deleteFile,
+  listContests, addContest, removeContest,
+  getSettings, saveSettings,
+  getTemplates, saveTemplate
+} from "./store.js";
 import {
   GOOGLE_CLIENT_ID,
   verifyGoogleIdToken,
@@ -222,6 +228,71 @@ const server = http.createServer(async (req, res) => {
         "Set-Cookie": clearSessionCookieHeader()
       });
       return res.end(JSON.stringify({ ok: true }));
+    }
+
+    // ---- Per-user workspace (logged-in only; anonymous uses the browser) ----
+    if (url.pathname.startsWith("/api/me/")) {
+      const user = await currentUser(req);
+      if (!user) return sendJson(res, 401, { error: "Not signed in." });
+      const uid = user.id;
+
+      if (req.method === "GET" && url.pathname === "/api/me/workspace") {
+        const [files, contests, settings, templates] = await Promise.all([
+          listFiles(uid), listContests(uid), getSettings(uid), getTemplates(uid)
+        ]);
+        return sendJson(res, 200, {
+          files: files.map((f) => ({
+            language: f.language, scope: f.scope, contestId: f.contest_id,
+            filename: f.filename, content: f.content || "", input: f.input_text || ""
+          })),
+          contests: contests.map((c) => ({ contestId: c.contest_id, name: c.name, language: c.language })),
+          settings,
+          templates
+        });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/file") {
+        const b = await readJsonBody(req);
+        if (!b || !b.language || !b.filename) return sendJson(res, 400, { error: "language and filename required" });
+        await saveFile(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "DELETE" && url.pathname === "/api/me/file") {
+        const b = await readJsonBody(req);
+        await deleteFile(uid, b || {});
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/settings") {
+        const b = await readJsonBody(req);
+        await saveSettings(uid, (b && b.settings) || {});
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/template") {
+        const b = await readJsonBody(req);
+        const valid = ["cpp_template", "headers", "python_template"];
+        if (!b || !valid.includes(b.kind)) return sendJson(res, 400, { error: "invalid template kind" });
+        await saveTemplate(uid, b.kind, b.content || "");
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/contest") {
+        const b = await readJsonBody(req);
+        if (!b || !b.contestId) return sendJson(res, 400, { error: "contestId required" });
+        await addContest(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "DELETE" && url.pathname === "/api/me/contest") {
+        const b = await readJsonBody(req);
+        if (!b || !b.contestId) return sendJson(res, 400, { error: "contestId required" });
+        await removeContest(uid, String(b.contestId));
+        return sendJson(res, 200, { ok: true });
+      }
+
+      return sendJson(res, 404, { error: "Unknown workspace route." });
     }
 
     if (req.method === "POST" && url.pathname === "/api/run") {
