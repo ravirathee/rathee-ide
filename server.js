@@ -6,6 +6,16 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { initStore, dbReady, upsertUser, getUserById } from "./store.js";
+import {
+  GOOGLE_CLIENT_ID,
+  verifyGoogleIdToken,
+  createSessionToken,
+  readSessionToken,
+  parseCookies,
+  sessionCookieHeader,
+  clearSessionCookieHeader
+} from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -156,9 +166,64 @@ await Promise.all([
   mkdir(ioFilesDir, { recursive: true })
 ]);
 
+// Connect to MySQL for accounts/persistence. Non-fatal: if it's unavailable the
+// IDE still runs for anonymous users (no login, no saved data).
+await initStore();
+
+// Resolve the logged-in user (or null) from the signed session cookie.
+async function currentUser(req) {
+  if (!dbReady()) return null;
+  const token = parseCookies(req).session;
+  const uid = readSessionToken(token);
+  if (!uid) return null;
+  try {
+    return await getUserById(uid);
+  } catch {
+    return null;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+    // ---- Auth ----
+    if (req.method === "GET" && url.pathname === "/api/auth/me") {
+      const user = await currentUser(req);
+      return sendJson(res, 200, {
+        loginEnabled: dbReady(),
+        clientId: GOOGLE_CLIENT_ID,
+        user: user ? { name: user.name, email: user.email, picture: user.picture } : null
+      });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/google") {
+      if (!dbReady()) return sendJson(res, 503, { error: "Accounts are unavailable right now." });
+      const body = await readJsonBody(req);
+      try {
+        const claims = await verifyGoogleIdToken(body && body.credential);
+        const user = await upsertUser(claims);
+        const token = createSessionToken(user.id);
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Set-Cookie": sessionCookieHeader(token, req)
+        });
+        return res.end(JSON.stringify({ user: { name: user.name, email: user.email, picture: user.picture } }));
+      } catch (error) {
+        return sendJson(res, 401, { error: `Sign-in failed: ${error.message}` });
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Set-Cookie": clearSessionCookieHeader()
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
     if (req.method === "POST" && url.pathname === "/api/run") {
       if (rateLimited(clientIp(req))) {
         return sendJson(res, 429, { error: "Too many requests. Please wait a moment and try again." });

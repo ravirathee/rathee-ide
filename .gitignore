@@ -23,3 +23,4 @@ workspace/IOFiles/*
 !workspace/IOFiles/.gitkeep
 !workspace/IOFiles/input.txt
 !workspace/IOFiles/output.txt
+node_modules/

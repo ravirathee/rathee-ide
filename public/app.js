@@ -652,6 +652,120 @@ function boot() {
   loadSavedContestList();
   loadWorkspaceFiles();
   loadTemplateFiles().then(() => Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]));
+  initAuth();
+}
+
+// ---------------------------------------------------------------------------
+// Google Sign-In. Anonymous use is allowed; signing in (later) persists your
+// workspace per-account. Phase 1 just establishes identity + shows who's in.
+// ---------------------------------------------------------------------------
+let authState = { user: null, clientId: null, loginEnabled: false };
+
+async function initAuth() {
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    const data = await res.json();
+    authState = { user: data.user, clientId: data.clientId, loginEnabled: data.loginEnabled };
+  } catch {
+    authState = { user: null, clientId: null, loginEnabled: false };
+  }
+  renderAuth();
+}
+
+function renderAuth() {
+  // Profile button: show the Google photo when signed in, else the person icon.
+  const avatar = document.querySelector("#profileAvatar");
+  const iconCircle = document.querySelector(".profile-icon-circle");
+  if (authState.user && authState.user.picture) {
+    if (avatar) { avatar.src = authState.user.picture; avatar.hidden = false; }
+    if (iconCircle) iconCircle.style.display = "none";
+  } else {
+    if (avatar) avatar.hidden = true;
+    if (iconCircle) iconCircle.style.display = "";
+  }
+
+  // Auth block inside the profile dropdown (above the Codeforces handle).
+  const area = document.querySelector("#authArea");
+  if (!area) return;
+  area.innerHTML = "";
+
+  if (authState.user) {
+    const wrap = document.createElement("div");
+    wrap.className = "auth-user";
+    if (authState.user.picture) {
+      const img = document.createElement("img");
+      img.src = authState.user.picture;
+      img.alt = "";
+      img.className = "auth-avatar";
+      img.referrerPolicy = "no-referrer";
+      wrap.append(img);
+    }
+    const info = document.createElement("div");
+    info.className = "auth-info";
+    const name = document.createElement("div");
+    name.className = "auth-name";
+    name.textContent = authState.user.name || "Account";
+    const email = document.createElement("div");
+    email.className = "auth-email";
+    email.textContent = authState.user.email || "";
+    info.append(name, email);
+    const out = document.createElement("button");
+    out.className = "auth-logout";
+    out.type = "button";
+    out.textContent = "Log out";
+    out.addEventListener("click", logout);
+    wrap.append(info, out);
+    area.append(wrap);
+    return;
+  }
+
+  if (!authState.loginEnabled || !authState.clientId) return; // accounts unavailable
+
+  const btn = document.createElement("div");
+  btn.id = "gsiButton";
+  area.append(btn);
+  renderGoogleButton(btn);
+}
+
+function renderGoogleButton(target, attempt = 0) {
+  if (!(window.google && window.google.accounts && window.google.accounts.id)) {
+    if (attempt < 40) return void setTimeout(() => renderGoogleButton(target, attempt + 1), 150);
+    return;
+  }
+  window.google.accounts.id.initialize({
+    client_id: authState.clientId,
+    callback: onGoogleCredential
+  });
+  window.google.accounts.id.renderButton(target, { type: "standard", theme: "outline", size: "medium", text: "signin_with" });
+}
+
+async function onGoogleCredential(response) {
+  try {
+    const res = await fetch("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: response.credential })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Sign-in failed");
+    }
+    await initAuth();
+  } catch (error) {
+    setStatus("Sign-in failed", "error");
+    els.meta.textContent = error.message;
+  }
+}
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.google?.accounts?.id?.disableAutoSelect?.();
+  } catch {
+    /* ignore */
+  }
+  authState.user = null;
+  renderAuth();
 }
 
 async function loadWorkspaceFiles() {
@@ -1324,7 +1438,7 @@ function toggleProfileMenu(force) {
     els.topProfileHandleInput.value = codeforcesHandle;
     updateProfileOpenLink();
     refreshProfileDisplay();
-    requestAnimationFrame(() => els.topProfileHandleInput.focus());
+    renderAuth(); // (re)render the Google button now the dropdown is visible
   }
 }
 

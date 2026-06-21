@@ -6,5 +6,8 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js"
+  },
+  "dependencies": {
+    "mysql2": "^3.22.5"
   }
 }
