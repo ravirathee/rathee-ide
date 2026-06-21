@@ -119,3 +119,84 @@ export async function getUserById(id) {
   );
   return rows[0] || null;
 }
+
+// ---- Files (per user) ----
+export async function listFiles(userId) {
+  const [rows] = await pool.query(
+    `SELECT language, scope, contest_id, filename, content, input_text, updated_at
+     FROM files WHERE user_id = ? ORDER BY scope, contest_id, filename`,
+    [userId]
+  );
+  return rows;
+}
+
+export async function saveFile(userId, { language, scope = "scratch", contestId = "", filename, content = "", input = "" }) {
+  await pool.query(
+    `INSERT INTO files (user_id, language, scope, contest_id, filename, content, input_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE content = VALUES(content), input_text = VALUES(input_text)`,
+    [userId, language, scope, contestId || "", filename, content ?? "", input ?? ""]
+  );
+}
+
+export async function deleteFile(userId, { language, scope = "scratch", contestId = "", filename }) {
+  await pool.query(
+    `DELETE FROM files WHERE user_id = ? AND language = ? AND scope = ? AND contest_id = ? AND filename = ?`,
+    [userId, language, scope, contestId || "", filename]
+  );
+}
+
+// ---- Contests (per user) ----
+export async function listContests(userId) {
+  const [rows] = await pool.query(
+    `SELECT contest_id, name, language, added_at FROM user_contests WHERE user_id = ? ORDER BY added_at DESC`,
+    [userId]
+  );
+  return rows;
+}
+
+export async function addContest(userId, { contestId, name = null, language = "cpp" }) {
+  await pool.query(
+    `INSERT INTO user_contests (user_id, contest_id, name, language)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE name = VALUES(name), language = VALUES(language)`,
+    [userId, String(contestId), name, language]
+  );
+}
+
+export async function removeContest(userId, contestId) {
+  await pool.query(`DELETE FROM files WHERE user_id = ? AND scope = 'contest' AND contest_id = ?`, [userId, String(contestId)]);
+  await pool.query(`DELETE FROM user_contests WHERE user_id = ? AND contest_id = ?`, [userId, String(contestId)]);
+}
+
+// ---- Settings (per user, JSON blob) ----
+export async function getSettings(userId) {
+  const [rows] = await pool.query(`SELECT data FROM settings WHERE user_id = ?`, [userId]);
+  if (!rows[0]) return {};
+  const data = rows[0].data;
+  return typeof data === "string" ? JSON.parse(data || "{}") : (data || {});
+}
+
+export async function saveSettings(userId, data) {
+  await pool.query(
+    `INSERT INTO settings (user_id, data) VALUES (?, CAST(? AS JSON))
+     ON DUPLICATE KEY UPDATE data = VALUES(data)`,
+    [userId, JSON.stringify(data || {})]
+  );
+}
+
+// ---- Templates (per user) ----
+export async function getTemplates(userId) {
+  const [rows] = await pool.query(`SELECT kind, content FROM templates WHERE user_id = ?`, [userId]);
+  const out = {};
+  for (const r of rows) out[r.kind] = r.content;
+  return out; // { cpp_template?, headers?, python_template? }
+}
+
+export async function saveTemplate(userId, kind, content) {
+  await pool.query(
+    `INSERT INTO templates (user_id, kind, content) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE content = VALUES(content)`,
+    [userId, kind, content ?? ""]
+  );
+}
