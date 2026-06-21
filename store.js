@@ -82,9 +82,16 @@ export async function initStore() {
     const bootstrap = await mysql.createConnection({
       host: dbConfig.host, port: dbConfig.port, user: dbConfig.user, password: dbConfig.password
     });
-    await bootstrap.query(
-      `CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-    );
+    // Best-effort auto-create. A least-privilege app user (granted only on the
+    // app database) can't CREATE DATABASE; that's fine when the DB already
+    // exists — we connect to it below regardless.
+    try {
+      await bootstrap.query(
+        `CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+      );
+    } catch (createError) {
+      console.warn(`Store: could not auto-create database (${createError.code || createError.message}); assuming it exists.`);
+    }
     await bootstrap.end();
 
     pool = mysql.createPool({ ...dbConfig, waitForConnections: true, connectionLimit: 10 });
