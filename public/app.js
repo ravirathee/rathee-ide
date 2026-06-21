@@ -94,6 +94,7 @@ const els = {
   autoCompletionCreateRuleBtn: document.querySelector("#autoCompletionCreateRuleBtn"),
   fontSizeLabel: document.querySelector("#fontSizeLabel"),
   saveTemplateBtn: document.querySelector("#saveTemplateBtn"),
+  saveFilesBtn: document.querySelector("#saveFilesBtn"),
   resetCodeBtn: document.querySelector("#resetCodeBtn"),
   editorQuickSettingsBtn: document.querySelector("#editorQuickSettingsBtn"),
   editorQuickSettings: document.querySelector("#editorQuickSettings"),
@@ -609,6 +610,7 @@ function boot() {
   els.autoCompletionCreateRuleBtn?.addEventListener("click", showAutoCompletionDraftRule);
   els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
+  els.saveFilesBtn.addEventListener("click", promptLoginToSave);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
   els.editorQuickSettingsBtn.addEventListener("click", toggleEditorQuickSettings);
   els.quickFontDownBtn.addEventListener("click", () => setEditorFontSize(editorFontSize - 1));
@@ -651,7 +653,10 @@ function boot() {
   updateEditorEmptyState();
   loadSavedContestList();
   loadWorkspaceFiles();
-  loadTemplateFiles().then(() => Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]));
+  loadTemplateFiles();
+  // initAuth determines who's signed in, THEN loads the workspace once from the
+  // correct backend (account DB vs anonymous). Doing the workspace load only
+  // here avoids a race where the anonymous and account loads competed on reload.
   initAuth();
 }
 
@@ -661,7 +666,11 @@ function boot() {
 // ---------------------------------------------------------------------------
 let authState = { user: null, clientId: null, loginEnabled: false };
 
-async function initAuth() {
+function isAuthed() {
+  return !!(authState && authState.user);
+}
+
+async function initAuth(justLoggedIn = false) {
   try {
     const res = await fetch("/api/auth/me", { cache: "no-store" });
     const data = await res.json();
@@ -670,9 +679,37 @@ async function initAuth() {
     authState = { user: null, clientId: null, loginEnabled: false };
   }
   renderAuth();
+  // On sign-in, the files you were just working on (temporary/in-memory) win:
+  // upload them to the account, overwriting the account's versions of the same
+  // files, so logging in never loses your current work.
+  if (isAuthed() && justLoggedIn) {
+    await uploadLocalFilesToAccount().catch(() => {});
+  }
+  // Reload the scratch workspace from the right backend now auth is known.
+  await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
+}
+
+async function uploadLocalFilesToAccount() {
+  const uploads = [];
+  for (const name of tempCppNames || []) {
+    uploads.push(putMyFile("cpp", "scratch", name, cppFiles[name] || "", cppInputs[name] || ""));
+  }
+  for (const name of tempPyNames || []) {
+    uploads.push(putMyFile("python", "scratch", name, pyFiles[name] || "", pyInputs[name] || ""));
+  }
+  await Promise.all(uploads).catch(() => {});
+}
+
+function putMyFile(language, scope, filename, content, input) {
+  return fetch("/api/me/file", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language, scope, contestId: "", filename, content, input })
+  });
 }
 
 function renderAuth() {
+  updateSaveFilesButton();
   // Profile button: show the Google photo when signed in, else the person icon.
   const avatar = document.querySelector("#profileAvatar");
   const iconCircle = document.querySelector(".profile-icon-circle");
@@ -750,7 +787,7 @@ async function onGoogleCredential(response) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || "Sign-in failed");
     }
-    await initAuth();
+    await initAuth(true); // justLoggedIn → seed empty account from current work, then load
   } catch (error) {
     setStatus("Sign-in failed", "error");
     els.meta.textContent = error.message;
@@ -766,6 +803,22 @@ async function logout() {
   }
   authState.user = null;
   renderAuth();
+  // Keep the current files on screen after logout (don't switch to a different
+  // workspace). The session is ended; the visible files just stop syncing to
+  // the account until you sign back in.
+}
+
+// Show a "Save" nudge for anonymous users editing code; signing in is what
+// actually persists their files to an account.
+function updateSaveFilesButton() {
+  if (!els.saveFilesBtn) return;
+  const show = !isAuthed() && authState.loginEnabled && editorView === "code";
+  els.saveFilesBtn.hidden = !show;
+}
+
+function promptLoginToSave() {
+  setStatus("Log in to save your files", "idle");
+  toggleProfileMenu(true); // reveal the dropdown with the Google sign-in button
 }
 
 async function loadWorkspaceFiles() {
@@ -778,26 +831,34 @@ async function loadWorkspaceFiles() {
   }
 }
 
+// Scratch files: signed-in users read from their account (DB); anonymous users
+// use the legacy shared endpoint (per-user browser storage comes in a later step).
+async function fetchScratchFiles(language) {
+  if (isAuthed()) {
+    const res = await fetch("/api/me/workspace", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load your files.");
+    return (data.files || [])
+      .filter((f) => f.language === language && f.scope === "scratch")
+      .map((f) => ({ filename: f.filename, code: f.content || "", input: f.input || "" }));
+  }
+  const endpoint = language === "python" ? "workspace-python-files" : "workspace-cpp-files";
+  const res = await fetch(`/api/${endpoint}?ts=${Date.now()}`, { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Could not load workspace files.");
+  return (data.files || []).map((f) => ({ filename: f.filename, code: f.code || "", input: "" }));
+}
+
 async function loadWorkspaceCppFiles() {
   try {
-    const res = await fetch(`/api/workspace-cpp-files?ts=${Date.now()}`, { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load workspace C++ files.");
-
-    if (data.files?.length) {
-      codeFileScope = "workspace";
-      activeContestDir = "";
-      cppFileNames = data.files.map((file) => file.filename);
-      cppFiles = Object.fromEntries(data.files.map((file) => [file.filename, file.code]));
-    } else {
-      codeFileScope = "workspace";
-      activeContestDir = "";
-      cppFileNames = [];
-      cppFiles = {};
-    }
+    const files = await fetchScratchFiles("cpp");
+    codeFileScope = "workspace";
+    activeContestDir = "";
+    cppFileNames = files.map((f) => f.filename);
+    cppFiles = Object.fromEntries(files.map((f) => [f.filename, f.code]));
     tempCppNames = cppFileNames.slice();
 
-    cppInputs = Object.fromEntries(cppFileNames.map((name) => [name, ""]));
+    cppInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
     cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
     cppProblems = Object.fromEntries(cppFileNames.map((name) => [name, null]));
     activeCppFile = cppFileNames.includes(activeCppFile) ? activeCppFile : cppFileNames[0] || "";
@@ -805,6 +866,7 @@ async function loadWorkspaceCppFiles() {
     if (editorView === "code" && els.language.value === "cpp") {
       renderFileTabs();
       setEditorCode(activeCppFile ? cppFiles[activeCppFile] : "");
+      els.input.value = cppInputs[activeCppFile] || "";
       updateEditorEmptyState();
     }
   } catch (error) {
@@ -814,24 +876,16 @@ async function loadWorkspaceCppFiles() {
 
 async function loadWorkspacePythonFiles() {
   try {
-    const res = await fetch(`/api/workspace-python-files?ts=${Date.now()}`, { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load workspace Python files.");
-
-    if (data.files?.length) {
-      if (els.language.value === "python") {
-        codeFileScope = "workspace";
-        activeContestDir = "";
-      }
-      pyFileNames = data.files.map((file) => file.filename);
-      pyFiles = Object.fromEntries(data.files.map((file) => [file.filename, file.code]));
-    } else {
-      pyFileNames = [];
-      pyFiles = {};
+    const files = await fetchScratchFiles("python");
+    if (els.language.value === "python") {
+      codeFileScope = "workspace";
+      activeContestDir = "";
     }
+    pyFileNames = files.map((f) => f.filename);
+    pyFiles = Object.fromEntries(files.map((f) => [f.filename, f.code]));
     tempPyNames = pyFileNames.slice();
 
-    pyInputs = Object.fromEntries(pyFileNames.map((name) => [name, ""]));
+    pyInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
     pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
     pyProblems = Object.fromEntries(pyFileNames.map((name) => [name, null]));
     activePyFile = pyFileNames.includes(activePyFile) ? activePyFile : pyFileNames[0] || "";
@@ -839,6 +893,7 @@ async function loadWorkspacePythonFiles() {
     if (editorView === "code" && els.language.value === "python") {
       renderFileTabs();
       setEditorCode(activePyFile ? pyFiles[activePyFile] : "");
+      els.input.value = pyInputs[activePyFile] || "";
       updateEditorEmptyState();
     }
   } catch (error) {
@@ -847,6 +902,10 @@ async function loadWorkspacePythonFiles() {
 }
 
 async function saveWorkspaceCppFile(filename, code) {
+  if (isAuthed()) {
+    await putMyFile("cpp", "scratch", filename, code, cppInputs[filename] || "");
+    return;
+  }
   await fetch("/api/workspace-cpp-files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -855,6 +914,10 @@ async function saveWorkspaceCppFile(filename, code) {
 }
 
 async function saveWorkspacePythonFile(filename, code) {
+  if (isAuthed()) {
+    await putMyFile("python", "scratch", filename, code, pyInputs[filename] || "");
+    return;
+  }
   await fetch("/api/workspace-python-files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -898,14 +961,30 @@ function scheduleWorkspaceCodeSave() {
 }
 
 async function deleteWorkspaceCppFile(filename) {
+  if (isAuthed()) {
+    await deleteMyFile("cpp", "scratch", filename);
+    return;
+  }
   await fetch(`/api/workspace-cpp-files?filename=${encodeURIComponent(filename)}`, {
     method: "DELETE"
   });
 }
 
 async function deleteWorkspacePythonFile(filename) {
+  if (isAuthed()) {
+    await deleteMyFile("python", "scratch", filename);
+    return;
+  }
   await fetch(`/api/workspace-python-files?filename=${encodeURIComponent(filename)}`, {
     method: "DELETE"
+  });
+}
+
+function deleteMyFile(language, scope, filename) {
+  return fetch("/api/me/file", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language, scope, contestId: "", filename })
   });
 }
 
@@ -2531,6 +2610,7 @@ function updateEditorActionButton() {
     els.resetCodeBtn.textContent = "Load from Template";
     els.resetCodeBtn.title = `Load active problem code from ${els.language.value === "python" ? "Template.py" : "Template.cpp"}`;
   }
+  updateSaveFilesButton();
 }
 
 function setEditorFontSize(size) {
