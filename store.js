@@ -49,6 +49,7 @@ const SCHEMA = [
      contest_id VARCHAR(32) NOT NULL,
      name VARCHAR(255),
      language ENUM('cpp','python') NOT NULL DEFAULT 'cpp',
+     problems JSON,
      added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      PRIMARY KEY (user_id, contest_id),
      CONSTRAINT fk_uc_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -88,6 +89,7 @@ export async function initStore() {
 
     pool = mysql.createPool({ ...dbConfig, waitForConnections: true, connectionLimit: 10 });
     for (const ddl of SCHEMA) await pool.query(ddl);
+    await applyMigrations();
     ready = true;
     console.log(`Store: connected to MySQL ${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
     return true;
@@ -95,6 +97,23 @@ export async function initStore() {
     ready = false;
     console.warn(`Store: MySQL unavailable (${error.code || error.message}). Running without accounts/persistence.`);
     return false;
+  }
+}
+
+// Add columns introduced after the initial schema. CREATE TABLE IF NOT EXISTS
+// won't alter an existing table, so guard each ADD COLUMN on information_schema.
+async function applyMigrations() {
+  await ensureColumn("user_contests", "problems", "JSON");
+}
+
+async function ensureColumn(table, column, definition) {
+  const [rows] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [dbConfig.database, table, column]
+  );
+  if (!rows.length) {
+    await pool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
   }
 }
 
@@ -149,18 +168,21 @@ export async function deleteFile(userId, { language, scope = "scratch", contestI
 // ---- Contests (per user) ----
 export async function listContests(userId) {
   const [rows] = await pool.query(
-    `SELECT contest_id, name, language, added_at FROM user_contests WHERE user_id = ? ORDER BY added_at DESC`,
+    `SELECT contest_id, name, language, problems, added_at FROM user_contests WHERE user_id = ? ORDER BY added_at DESC`,
     [userId]
   );
-  return rows;
+  return rows.map((r) => ({
+    ...r,
+    problems: typeof r.problems === "string" ? JSON.parse(r.problems || "[]") : (r.problems || [])
+  }));
 }
 
-export async function addContest(userId, { contestId, name = null, language = "cpp" }) {
+export async function addContest(userId, { contestId, name = null, language = "cpp", problems = [] }) {
   await pool.query(
-    `INSERT INTO user_contests (user_id, contest_id, name, language)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE name = VALUES(name), language = VALUES(language)`,
-    [userId, String(contestId), name, language]
+    `INSERT INTO user_contests (user_id, contest_id, name, language, problems)
+     VALUES (?, ?, ?, ?, CAST(? AS JSON))
+     ON DUPLICATE KEY UPDATE name = VALUES(name), language = VALUES(language), problems = VALUES(problems)`,
+    [userId, String(contestId), name, language, JSON.stringify(problems || [])]
   );
 }
 

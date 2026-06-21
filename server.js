@@ -245,7 +245,10 @@ const server = http.createServer(async (req, res) => {
             language: f.language, scope: f.scope, contestId: f.contest_id,
             filename: f.filename, content: f.content || "", input: f.input_text || ""
           })),
-          contests: contests.map((c) => ({ contestId: c.contest_id, name: c.name, language: c.language })),
+          contests: contests.map((c) => ({
+            contestId: c.contest_id, name: c.name, language: c.language,
+            problems: c.problems || [], savedAt: c.added_at
+          })),
           settings,
           templates
         });
@@ -413,8 +416,15 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await fetchCodeforcesProblems(body.url);
       const templates = await readTemplateBundle();
-      const materialized = await materializeContestFiles(result, { language: body.language, templates });
-      result.files = materialized;
+      // Per-user model: don't write shared workspace/contests folders. Hand the
+      // fetched problems + starter templates back; the client persists them
+      // per-account (MySQL when signed in) or keeps them in memory (anonymous).
+      const selectedLanguage = body.language === "python" ? "python" : "cpp";
+      const starter = selectedLanguage === "python" ? (templates.python || "") : (templates.template || "");
+      for (const problem of result.problems || []) {
+        if (problem.code == null || problem.code === "") problem.code = starter;
+      }
+      result.files = { language: selectedLanguage, contestDir: "" };
       return sendJson(res, 200, result);
     }
 

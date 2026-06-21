@@ -135,6 +135,19 @@ let pyProblems = {};
 let activePyFile = "A.py";
 let codeFileScope = "workspace";
 let activeContestDir = "";
+let activeContestId = ""; // Codeforces id of the open contest; DB key for scope='contest' files
+// Files currently open as tabs in the editor (a subset of the file lists). The
+// tab "×" closes a tab (removes it from here); the file itself only goes away
+// when deleted from the left drawer. Kept per-language.
+let openCppTabs = [];
+let openPyTabs = [];
+// In-memory snapshots of each context (the temp workspace and each contest),
+// keyed "workspace" or "contest:<id>". Lets anonymous sessions hold the temp
+// files AND a contest open at once (no backend), switching without losing edits.
+const contextSnapshots = new Map();
+// Inline SVG icons for the drawer file-row actions (inherit color via currentColor).
+const ICON_RENAME = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+const ICON_DELETE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 // Names of the temporary workspace files, cached separately so the "Temporary
 // Code Files" list stays populated even while a contest is the active scope.
 let tempCppNames = [];
@@ -542,7 +555,13 @@ function boot() {
     // Just toggle the file-name list (like a saved contest); opening files into
     // the editor happens only when a specific file name is clicked.
     tempFilesExpanded = !tempFilesExpanded;
-    renderTempFiles();
+    // While a contest is the open scope the temp list comes from a cache; on
+    // expand, refresh it from the account so it shows the latest scratch files.
+    if (tempFilesExpanded && isAuthed() && codeFileScope !== "workspace") {
+      loadSavedContestList();
+    } else {
+      renderTempFiles();
+    }
   });
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
@@ -676,12 +695,15 @@ async function initAuth(justLoggedIn = false) {
     authState = { user: null, clientId: null, loginEnabled: false };
   }
   renderAuth();
-  // On sign-in, the files you were just working on (temporary/in-memory) win:
-  // upload them to the account, overwriting the account's versions of the same
-  // files, so logging in never loses your current work.
   if (isAuthed()) {
-    if (justLoggedIn) await uploadLocalFilesToAccount().catch(() => {});
+    // On sign-in the account's own files load as-is. Anything you were working
+    // on anonymously is MERGED in without clobbering account files: a temp file
+    // whose name clashes with an account file is imported under a
+    // "<name>ImportedAfterLogin.<ext>" name, and only files you actually changed
+    // (i.e. not still the untouched template) are carried over.
+    const local = justLoggedIn ? captureAnonymousWorkspace() : null;
     await applyAccountSettingsAndTemplates(justLoggedIn).catch(() => {});
+    if (local) await mergeLocalIntoAccount(local).catch(() => {});
   }
   // Reload the scratch workspace from the right backend now auth is known.
   await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
@@ -728,22 +750,154 @@ function reapplyAllSettings() {
   loadCodeforcesProfile();
 }
 
-async function uploadLocalFilesToAccount() {
-  const uploads = [];
-  for (const name of tempCppNames || []) {
-    uploads.push(putMyFile("cpp", "scratch", name, cppFiles[name] || "", cppInputs[name] || ""));
+// Snapshot the current anonymous in-memory workspace right before account data
+// loads, so it can be merged in. Because only one workspace is active at a time,
+// this captures either the scratch files (workspace scope) or the just-imported
+// in-memory contest (contest scope). Whether a file counts as "changed" is
+// decided later against the shipped default template, not anything captured here.
+function captureAnonymousWorkspace() {
+  const snap = {
+    scratch: { cpp: [], python: [] },
+    contests: []
+  };
+  if (codeFileScope === "workspace") {
+    for (const name of cppFileNames) snap.scratch.cpp.push({ filename: name, content: cppFiles[name] || "", input: cppInputs[name] || "" });
+    for (const name of pyFileNames) snap.scratch.python.push({ filename: name, content: pyFiles[name] || "", input: pyInputs[name] || "" });
   }
-  for (const name of tempPyNames || []) {
-    uploads.push(putMyFile("python", "scratch", name, pyFiles[name] || "", pyInputs[name] || ""));
+  for (const c of savedContests) {
+    if (!c.inMemory) continue;
+    const entry = {
+      contestId: String(c.contestId || ""),
+      name: c.name || "",
+      language: c.language || els.language.value,
+      problems: (c.problems || []).map((p) => ({ index: p.index, name: p.name || "" })),
+      files: { cpp: [], python: [] }
+    };
+    // The active in-memory contest's files live in the current arrays.
+    if (codeFileScope === "contest" && String(activeContestId) === entry.contestId) {
+      for (const name of cppFileNames) entry.files.cpp.push({ filename: name, content: cppFiles[name] || "", input: cppInputs[name] || "" });
+      for (const name of pyFileNames) entry.files.python.push({ filename: name, content: pyFiles[name] || "", input: pyInputs[name] || "" });
+    }
+    snap.contests.push(entry);
+  }
+  return snap;
+}
+
+function importedAfterLoginName(filename) {
+  const dot = filename.lastIndexOf(".");
+  const base = dot >= 0 ? filename.slice(0, dot) : filename;
+  const ext = dot >= 0 ? filename.slice(dot) : "";
+  return `${base}ImportedAfterLogin${ext}`;
+}
+
+// True if `content` is non-empty and differs from the starter template, i.e. the
+// user actually wrote something. Whitespace-insensitive so trivial reformatting
+// of a pristine template still counts as "untouched".
+function isChangedFromTemplate(language, content, templates) {
+  const baseline = language === "python" ? (templates?.python ?? pythonCode) : (templates?.cpp ?? cppTemplate);
+  const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  const value = norm(content);
+  return value !== "" && value !== norm(baseline);
+}
+
+function uniqueName(existing, filename) {
+  if (!existing.has(filename)) return filename;
+  const dot = filename.lastIndexOf(".");
+  const base = dot >= 0 ? filename.slice(0, dot) : filename;
+  const ext = dot >= 0 ? filename.slice(dot) : "";
+  let i = 2;
+  while (existing.has(`${base}${i}${ext}`)) i += 1;
+  return `${base}${i}${ext}`;
+}
+
+function registerContestToAccount(contestId, contest) {
+  return fetch("/api/me/contest", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contestId, name: contest.name || "",
+      language: contest.language || "cpp", problems: contest.problems || []
+    })
+  });
+}
+
+// Merge the captured anonymous workspace into the signed-in account:
+//  - scratch: changed files only; name clash → "<name>ImportedAfterLogin.<ext>".
+//  - contest the account doesn't have yet → register it + import changed files.
+//  - contest already in the account → only changed files, each renamed
+//    "<name>ImportedAfterLogin.<ext>" so account work is never overwritten.
+async function mergeLocalIntoAccount(local) {
+  const res = await fetch("/api/me/workspace", { cache: "no-store" });
+  if (!res.ok) return;
+  const data = await res.json();
+
+  // Baseline for "changed" is the DEFAULT template (the server's Template.cpp /
+  // Template.py), which is the same for everyone and unaffected by any in-session
+  // template edits — so a file is only carried over if it differs from the
+  // shipped default, and the template itself is never imported.
+  const tplRes = await fetch(`/api/template-files?ts=${Date.now()}`, { cache: "no-store" }).catch(() => null);
+  const tpl = tplRes && tplRes.ok ? await tplRes.json().catch(() => ({})) : {};
+  const defaults = { cpp: tpl.template || "", python: tpl.python || "" };
+
+  const scratch = { cpp: new Set(), python: new Set() };
+  const contestFiles = {}; // `${contestId}|${language}` -> Set(filename)
+  for (const f of data.files || []) {
+    if (f.scope === "scratch") scratch[f.language]?.add(f.filename);
+    else if (f.scope === "contest") {
+      const key = `${f.contestId}|${f.language}`;
+      (contestFiles[key] || (contestFiles[key] = new Set())).add(f.filename);
+    }
+  }
+  const accountContestIds = new Set((data.contests || []).map((c) => String(c.contestId)));
+  const uploads = [];
+
+  const addScratch = (lang, file) => {
+    if (!isChangedFromTemplate(lang, file.content, defaults)) return;
+    const set = scratch[lang];
+    const candidate = set.has(file.filename) ? importedAfterLoginName(file.filename) : file.filename;
+    const name = uniqueName(set, candidate);
+    set.add(name);
+    uploads.push(putMyFile(lang, "scratch", name, file.content, file.input, ""));
+  };
+  local.scratch.cpp.forEach((f) => addScratch("cpp", f));
+  local.scratch.python.forEach((f) => addScratch("python", f));
+
+  for (const contest of local.contests) {
+    const cid = String(contest.contestId || "");
+    if (!cid) continue;
+    if (!accountContestIds.has(cid)) {
+      // New contest: register it (so it shows in the drawer) but store only the
+      // files you actually changed — untouched problems re-render from template.
+      uploads.push(registerContestToAccount(cid, contest));
+      for (const f of contest.files.cpp) {
+        if (isChangedFromTemplate("cpp", f.content, defaults)) uploads.push(putMyFile("cpp", "contest", f.filename, f.content, f.input, cid));
+      }
+      for (const f of contest.files.python) {
+        if (isChangedFromTemplate("python", f.content, defaults)) uploads.push(putMyFile("python", "contest", f.filename, f.content, f.input, cid));
+      }
+    } else {
+      const mergeLang = (lang, files) => {
+        const key = `${cid}|${lang}`;
+        const set = contestFiles[key] || (contestFiles[key] = new Set());
+        for (const f of files) {
+          if (!isChangedFromTemplate(lang, f.content, defaults)) continue;
+          const name = uniqueName(set, importedAfterLoginName(f.filename));
+          set.add(name);
+          uploads.push(putMyFile(lang, "contest", name, f.content, f.input, cid));
+        }
+      };
+      mergeLang("cpp", contest.files.cpp);
+      mergeLang("python", contest.files.python);
+    }
   }
   await Promise.all(uploads).catch(() => {});
 }
 
-function putMyFile(language, scope, filename, content, input) {
+function putMyFile(language, scope, filename, content, input, contestId = "") {
   return fetch("/api/me/file", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, scope, contestId: "", filename, content, input })
+    body: JSON.stringify({ language, scope, contestId, filename, content, input })
   });
 }
 
@@ -842,9 +996,36 @@ async function logout() {
   }
   authState.user = null;
   renderAuth();
-  loadSavedContestList(); // clears the saved-contest list (anonymous shows none)
-  // Keep the current code files on screen after logout (don't switch to a
-  // different workspace). The session is ended; they just stop syncing.
+  // Logging out returns to a clean anonymous slate — same as a fresh page load:
+  // empty temporary files and no contest (without an actual page reload).
+  resetToAnonymousWorkspace();
+}
+
+// Reset the in-memory workspace to the anonymous starting point: no temporary
+// files, no contest, empty editor. Used on logout so the screen looks like a
+// fresh visit without a hard refresh.
+function resetToAnonymousWorkspace() {
+  codeFileScope = "workspace";
+  activeContestDir = "";
+  activeContestId = "";
+  cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; tempCppNames = [];
+  pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; tempPyNames = [];
+  openCppTabs = []; openPyTabs = [];
+  savedContests = [];
+  expandedContestKeys.clear();
+  recentContest = null;
+  localStorage.removeItem("rathee.recentContest");
+  editorView = "code";
+  els.language.value = currentLanguage || "cpp";
+  els.quickLanguage.value = els.language.value;
+  renderFileTabs();
+  renderTempFiles();
+  renderSavedContests();
+  setEditorCode("");
+  if (els.input) els.input.value = "";
+  if (els.output) els.output.value = "";
+  updateEditorEmptyState();
+  updateSaveFilesButton();
 }
 
 // Show a "Save" nudge for anonymous users editing code; signing in is what
@@ -888,9 +1069,11 @@ async function loadWorkspaceCppFiles() {
     const files = await fetchScratchFiles("cpp");
     codeFileScope = "workspace";
     activeContestDir = "";
+    activeContestId = "";
     cppFileNames = files.map((f) => f.filename);
     cppFiles = Object.fromEntries(files.map((f) => [f.filename, f.code]));
     tempCppNames = cppFileNames.slice();
+    openCppTabs = cppFileNames.slice();
 
     cppInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
     cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
@@ -903,6 +1086,9 @@ async function loadWorkspaceCppFiles() {
       els.input.value = cppInputs[activeCppFile] || "";
       updateEditorEmptyState();
     }
+    // Scope is now "workspace" — re-render the contest drawer so its rows reflect
+    // the closed (non-open) state with correct open handlers, not stale ones.
+    renderSavedContests();
   } catch (error) {
     els.meta.textContent = error.message || "Could not load workspace C++ files";
   }
@@ -914,10 +1100,12 @@ async function loadWorkspacePythonFiles() {
     if (els.language.value === "python") {
       codeFileScope = "workspace";
       activeContestDir = "";
+      activeContestId = "";
     }
     pyFileNames = files.map((f) => f.filename);
     pyFiles = Object.fromEntries(files.map((f) => [f.filename, f.code]));
     tempPyNames = pyFileNames.slice();
+    openPyTabs = pyFileNames.slice();
 
     pyInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
     pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
@@ -930,6 +1118,7 @@ async function loadWorkspacePythonFiles() {
       els.input.value = pyInputs[activePyFile] || "";
       updateEditorEmptyState();
     }
+    renderSavedContests(); // reflect the now-workspace scope in the contest drawer
   } catch (error) {
     els.meta.textContent = error.message || "Could not load workspace Python files";
   }
@@ -946,21 +1135,13 @@ async function saveWorkspacePythonFile(filename, code) {
 }
 
 async function saveContestCppFile(filename, code) {
-  if (!activeContestDir || !isAuthed()) return; // anonymous: nothing is persisted
-  await fetch("/api/codeforces/contest-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contestDir: activeContestDir, filename, code })
-  });
+  if (!isAuthed() || !activeContestId) return; // anonymous: nothing is persisted
+  await putMyFile("cpp", "contest", filename, code, cppInputs[filename] || "", activeContestId);
 }
 
 async function saveContestPythonFile(filename, code) {
-  if (!activeContestDir || !isAuthed()) return; // anonymous: nothing is persisted
-  await fetch("/api/codeforces/contest-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contestDir: activeContestDir, filename, code })
-  });
+  if (!isAuthed() || !activeContestId) return; // anonymous: nothing is persisted
+  await putMyFile("python", "contest", filename, code, pyInputs[filename] || "", activeContestId);
 }
 
 function scheduleWorkspaceCodeSave() {
@@ -990,11 +1171,11 @@ async function deleteWorkspacePythonFile(filename) {
   await deleteMyFile("python", "scratch", filename);
 }
 
-function deleteMyFile(language, scope, filename) {
+function deleteMyFile(language, scope, filename, contestId = "") {
   return fetch("/api/me/file", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, scope, contestId: "", filename })
+    body: JSON.stringify({ language, scope, contestId, filename })
   });
 }
 
@@ -1928,6 +2109,7 @@ function switchLanguage() {
   setEditorCode(activeFile ? files[activeFile] : "");
   els.input.value = activeFile ? inputs[activeFile] || "" : "";
   renderFileTabs();
+  renderSavedContests(); // open-contest file rows are language-specific
   updateEditorEmptyState();
   updateEditorActionButton();
   setStatus("Idle", "idle");
@@ -1935,6 +2117,11 @@ function switchLanguage() {
 
 function openProblemCode() {
   switchEditorView("code");
+  // Signed-in users re-sync their files from the account. Anonymous users keep
+  // their in-memory files as-is — reloading would fetch nothing and wipe them,
+  // which is what made temporary files vanish after editing a template. A
+  // template change only affects files created afterwards (addNextCodeFile).
+  if (!isAuthed()) return;
   if (els.language.value === "python") {
     loadWorkspacePythonFiles();
   } else {
@@ -1961,11 +2148,39 @@ async function loadSavedContestList() {
     return;
   }
   try {
-    const res = await fetch(`/api/codeforces/contests?ts=${Date.now()}`, { cache: "no-store" });
+    const res = await fetch("/api/me/workspace", { cache: "no-store" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not load saved contests.");
-    savedContests = data.contests || [];
+    // Group the actual stored files per contest/language so the drawer can list
+    // what really exists (after deletes/renames), not just the canonical problems.
+    const filesByContest = {};
+    for (const f of data.files || []) {
+      if (f.scope !== "contest") continue;
+      const cid = String(f.contestId);
+      const bucket = filesByContest[cid] || (filesByContest[cid] = { cpp: [], python: [] });
+      if (f.language === "python") bucket.python.push(f.filename);
+      else bucket.cpp.push(f.filename);
+    }
+    savedContests = (data.contests || []).map((c) => ({
+      name: c.name || `Contest ${c.contestId}`,
+      contestId: String(c.contestId),
+      contestDir: "",
+      language: c.language || "cpp",
+      problems: c.problems || [],
+      problemCount: (c.problems || []).length,
+      files: filesByContest[String(c.contestId)] || { cpp: [], python: [] },
+      savedAt: c.savedAt || "",
+      account: true
+    }));
+    // Keep the Temporary Code Files cache fresh from the account too, so its list
+    // is the latest (e.g. after deletes) even while a contest is the open scope.
+    // In workspace scope the live arrays are the source of truth, so leave them.
+    if (codeFileScope !== "workspace") {
+      tempCppNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "cpp").map((f) => f.filename);
+      tempPyNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "python").map((f) => f.filename);
+    }
     renderSavedContests();
+    renderTempFiles();
   } catch (error) {
     els.meta.textContent = error.message || "Could not refresh saved contests";
   }
@@ -2004,6 +2219,9 @@ function renderSavedContests() {
     const group = document.createElement("div");
     group.className = "saved-contest-group";
 
+    const header = document.createElement("div");
+    header.className = "saved-contest-header";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "drawer-item saved-contest-btn contest-toggle-btn";
@@ -2020,19 +2238,64 @@ function renderSavedContests() {
 
     button.append(chevron, label);
     button.addEventListener("click", () => toggleContestProblems(contest));
-    group.append(button);
+
+    // Delete-whole-contest icon (hover) — removes the contest and all its files.
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "temp-file-action temp-file-delete contest-delete-btn";
+    del.title = `Delete contest ${contest.name}`;
+    del.innerHTML = ICON_DELETE;
+    del.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteContest(contest);
+    });
+
+    header.append(button, del);
+    group.append(header);
 
     if (expanded) {
       const list = document.createElement("div");
       list.className = "contest-problem-list";
-      for (const problem of contest.problems || []) {
-        const problemButton = document.createElement("button");
-        problemButton.type = "button";
-        problemButton.className = "contest-problem-btn";
-        problemButton.textContent = `${problem.index}. ${problem.name || "Problem"}`;
-        problemButton.title = problemButton.textContent;
-        problemButton.addEventListener("click", () => loadSavedContest(contest, problem.index));
-        list.append(problemButton);
+      const isPython = els.language.value === "python";
+      const ext = isPython ? ".py" : ".cpp";
+      const isOpen = codeFileScope === "contest" && String(activeContestId) === String(contest.contestId);
+      // Map canonical filenames to their problem labels (e.g. "A.cpp" -> "A. Hello").
+      const labelByName = {};
+      for (const p of contest.problems || []) labelByName[`${p.index}${ext}`] = `${p.index}. ${p.name || "Problem"}`;
+      if (isOpen) {
+        // Contest is loaded: show its actual files for the current language
+        // (canonical problems + any renamed/extra files) with rename/delete,
+        // just like temporary files. Keep the entry's file list in sync so a
+        // collapse (or future reopen) reflects the current state.
+        const names = isPython ? pyFileNames : cppFileNames;
+        const tabLabels = isPython ? pyTabLabels : cppTabLabels;
+        contest.files = { cpp: cppFileNames.slice(), python: pyFileNames.slice() };
+        const activeFile = currentActiveFile();
+        for (const filename of names) {
+          const isActive = editorView === "code" && filename === activeFile;
+          const ctx = { language: els.language.value, scope: "contest", contestId: String(contest.contestId), filename };
+          const row = createManagedFileRow(ctx, tabLabels[filename] || filename, isActive, () => switchCodeFile(filename), true);
+          list.append(row);
+        }
+      } else {
+        // Contest not loaded: list the files that actually exist for this
+        // language. "Known" means we've loaded this contest's file list (the
+        // array exists, even if empty) — then we show exactly those, so deleted
+        // files don't reappear. Only when the list is UNKNOWN (never loaded) do
+        // we fall back to the canonical problem names so the contest is openable.
+        const lang = isPython ? "python" : "cpp";
+        const known = contest.files && Array.isArray(contest.files[lang]);
+        const stored = known
+          ? contest.files[lang].slice().sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+          : [];
+        const names = known ? stored : (contest.problems || []).map((p) => `${p.index}${ext}`);
+        for (const filename of names) {
+          const ctx = { language: els.language.value, scope: "contest", contestId: String(contest.contestId), filename };
+          // Only real (known) stored files are manageable; canonical fallbacks aren't files yet.
+          const manageable = isAuthed() && known;
+          const row = createManagedFileRow(ctx, labelByName[filename] || filename, false, () => loadSavedContest(contest, filename.slice(0, -ext.length)), manageable);
+          list.append(row);
+        }
       }
       group.append(list);
     }
@@ -2071,12 +2334,70 @@ function shortenContestName(name) {
     .trim();
 }
 
+// Delete an entire contest: its account rows (files + registration) when signed
+// in, plus its in-memory snapshot and drawer entry. If it's the open contest,
+// fall back to the temp workspace afterwards.
+async function deleteContest(contest) {
+  const cid = String(contest.contestId || "");
+  const wasOpen = codeFileScope === "contest" && String(activeContestId) === cid;
+  if (isAuthed() && cid) {
+    await fetch("/api/me/contest", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contestId: cid })
+    }).catch(() => {});
+  }
+  contextSnapshots.delete(`contest:${cid}`);
+  savedContests = savedContests.filter((c) => String(c.contestId) !== cid);
+  expandedContestKeys.delete(contestKeyFor(contest));
+  if (wasOpen) {
+    codeFileScope = "workspace";
+    activeContestId = "";
+    activeContestDir = "";
+    if (isAuthed()) {
+      await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
+    } else {
+      if (!restoreContext("workspace")) {
+        cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; openCppTabs = [];
+        pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; openPyTabs = [];
+      }
+      renderCurrentContext();
+    }
+  }
+  renderSavedContests();
+  setStatus("Deleted", "idle");
+  els.meta.textContent = `Contest ${contest.name} deleted`;
+}
+
 async function loadSavedContest(contest, targetProblemIndex = "") {
   if (contest?.inMemory) {
-    // Anonymous session contest: files are already loaded — just switch problem.
+    // Anonymous session contest held in memory. If it's already the open scope,
+    // just switch the problem; otherwise restore its snapshot (preserving the
+    // context we leave), so temp files and the contest can coexist.
+    const cid = String(contest.contestId || "");
     const ext = els.language.value === "python" ? ".py" : ".cpp";
-    const fn = targetProblemIndex ? `${targetProblemIndex}${ext}` : "";
-    if (fn && currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+    if (codeFileScope === "contest" && String(activeContestId) === cid) {
+      const fn = targetProblemIndex ? `${targetProblemIndex}${ext}` : "";
+      if (fn && currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+      return;
+    }
+    stashCurrentContext();
+    codeFileScope = "contest";
+    activeContestId = cid;
+    activeContestDir = contest.contestDir || "";
+    restoreContext(`contest:${cid}`);
+    const want = targetProblemIndex ? `${targetProblemIndex}${ext}` : "";
+    const names = currentFileNames();
+    const target = want && names.includes(want) ? want : (currentActiveFile() && names.includes(currentActiveFile()) ? currentActiveFile() : names[0] || "");
+    if (target) {
+      if (els.language.value === "python") activePyFile = target;
+      else activeCppFile = target;
+    }
+    renderCurrentContext();
+    return;
+  }
+  if (contest?.account || (isAuthed() && contest?.contestId)) {
+    await openAccountContest(contest, targetProblemIndex);
     return;
   }
   if (!contest?.contestDir && !contest?.contestId) return;
@@ -2118,6 +2439,58 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
     setDebuggerOutput(error.message);
     setStatus("Load failed", "error");
     els.meta.textContent = "Saved contest could not be loaded from workspace";
+    showDebug(true);
+  } finally {
+    setImportBusy(false);
+  }
+}
+
+// Reopen a contest stored in the signed-in user's account. Problem files for
+// both languages come from the DB (scope='contest'); we feed them to
+// applyContestProblems via its `stored` override so edits are preserved.
+async function openAccountContest(contest, targetProblemIndex = "") {
+  const contestId = String(contest.contestId || "");
+  if (!contestId) return;
+  els.contestUrl.value = `https://codeforces.com/contest/${contestId}`;
+  updateContestChip();
+  saveCurrentState();
+  setImportBusy(true);
+  setStatus("Loading", "idle");
+  els.meta.textContent = "Loading saved contest...";
+  try {
+    const res = await fetch("/api/me/workspace", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load contest.");
+    const stored = { cpp: {}, python: {} };
+    for (const f of data.files || []) {
+      if (f.scope !== "contest" || String(f.contestId) !== contestId) continue;
+      stored[f.language][f.filename] = { content: f.content || "", input: f.input || "" };
+    }
+    recentContest = {
+      url: `https://codeforces.com/contest/${contestId}`,
+      name: contest.name,
+      contestId,
+      contestDir: ""
+    };
+    localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
+    scheduleAppSettingsSave();
+    const synthetic = {
+      contestId,
+      name: contest.name,
+      problems: contest.problems || [],
+      files: { language: els.language.value, contestDir: "" }
+    };
+    // Reopen shows exactly what's saved (onlyStored) so deleted files stay gone.
+    applyContestProblems(synthetic, { source: "saved", stored, onlyStored: true });
+    if (targetProblemIndex) {
+      const ext = els.language.value === "python" ? ".py" : ".cpp";
+      const fn = `${targetProblemIndex}${ext}`;
+      if (currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+    }
+  } catch (error) {
+    setDebuggerOutput(error.message);
+    setStatus("Load failed", "error");
+    els.meta.textContent = "Saved contest could not be loaded";
     showDebug(true);
   } finally {
     setImportBusy(false);
@@ -2194,16 +2567,121 @@ function renderTempFiles() {
 
   const labels = inWorkspace ? currentTabLabels() : {};
   const activeFile = currentActiveFile();
+  const language = els.language.value;
+  // Workspace files are manageable when they're the live list (any session) or
+  // for signed-in users even while a contest is open (their files persist).
+  const manageable = inWorkspace || isAuthed();
   for (const filename of names) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "contest-problem-btn temp-file-btn";
-    btn.textContent = labels[filename] || filename;
-    btn.title = btn.textContent;
-    btn.classList.toggle("active", inWorkspace && editorView === "code" && filename === activeFile);
-    btn.addEventListener("click", () => openTempFile(filename));
-    els.tempFileList.append(btn);
+    const isActive = inWorkspace && editorView === "code" && filename === activeFile;
+    const ctx = { language, scope: "workspace", contestId: "", filename };
+    const row = createManagedFileRow(ctx, labels[filename] || filename, isActive, () => openTempFile(filename), manageable);
+    els.tempFileList.append(row);
   }
+}
+
+// Build a drawer file row: an open button plus hover rename/delete icons. `ctx`
+// is the file's full target {language, scope, contestId, filename} so the
+// rename/delete handlers work even when the file isn't in the active editor
+// (e.g. managing contest files while in the workspace, or vice versa). When
+// `manageable` is false the icons are omitted (read-only row).
+function createManagedFileRow(ctx, label, isActive, onOpen, manageable) {
+  const filename = ctx.filename;
+  const row = document.createElement("div");
+  row.className = "temp-file-row";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "contest-problem-btn temp-file-btn";
+  btn.textContent = label || filename;
+  btn.title = btn.textContent;
+  btn.classList.toggle("active", Boolean(isActive));
+  btn.addEventListener("click", onOpen);
+  row.append(btn);
+
+  if (manageable) {
+    const actions = document.createElement("div");
+    actions.className = "temp-file-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "temp-file-action";
+    renameBtn.title = `Rename ${filename}`;
+    renameBtn.innerHTML = ICON_RENAME;
+    renameBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      beginRenameInline(row, ctx);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "temp-file-action temp-file-delete";
+    deleteBtn.title = `Delete ${filename}`;
+    deleteBtn.innerHTML = ICON_DELETE;
+    deleteBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteDrawerFile(ctx);
+    });
+
+    actions.append(renameBtn, deleteBtn);
+    row.append(actions);
+  }
+  return row;
+}
+
+// Is this file the one in the active editor context? (Live arrays are the
+// current language only, so language must match too.)
+function isActiveFileContext(ctx) {
+  if (ctx.language !== els.language.value) return false;
+  if (ctx.scope === "workspace") return codeFileScope === "workspace";
+  if (ctx.scope === "contest") return codeFileScope === "contest" && String(activeContestId) === String(ctx.contestId);
+  return false;
+}
+
+// Re-render the tab strip and both drawer file lists (temp + saved contests)
+// after a file add/rename/delete, so every view stays in sync regardless of scope.
+function refreshDrawerAndTabs() {
+  renderFileTabs(); // also re-renders the Temporary Code Files list
+  renderSavedContests();
+}
+
+function currentContextKey() {
+  return codeFileScope === "contest" && activeContestId ? `contest:${activeContestId}` : "workspace";
+}
+
+// Save the current editor context (all files for both languages) into the
+// in-memory store, so it can be restored when switching back without a backend.
+function stashCurrentContext() {
+  if (editorView === "code") saveCurrentState();
+  contextSnapshots.set(currentContextKey(), {
+    cpp: { names: cppFileNames.slice(), files: { ...cppFiles }, inputs: { ...cppInputs }, labels: { ...cppTabLabels }, problems: { ...cppProblems }, active: activeCppFile, open: openCppTabs.slice() },
+    python: { names: pyFileNames.slice(), files: { ...pyFiles }, inputs: { ...pyInputs }, labels: { ...pyTabLabels }, problems: { ...pyProblems }, active: activePyFile, open: openPyTabs.slice() }
+  });
+}
+
+function restoreContext(key) {
+  const s = contextSnapshots.get(key);
+  if (!s) return false;
+  cppFileNames = s.cpp.names.slice(); cppFiles = { ...s.cpp.files }; cppInputs = { ...s.cpp.inputs };
+  cppTabLabels = { ...s.cpp.labels }; cppProblems = { ...s.cpp.problems }; activeCppFile = s.cpp.active; openCppTabs = s.cpp.open.slice();
+  pyFileNames = s.python.names.slice(); pyFiles = { ...s.python.files }; pyInputs = { ...s.python.inputs };
+  pyTabLabels = { ...s.python.labels }; pyProblems = { ...s.python.problems }; activePyFile = s.python.active; openPyTabs = s.python.open.slice();
+  return true;
+}
+
+// Paint the editor + drawer for whatever the live arrays currently hold.
+function renderCurrentContext() {
+  const isPython = els.language.value === "python";
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const active = isPython ? activePyFile : activeCppFile;
+  editorView = "code";
+  setEditorLanguage(els.language.value);
+  setEditorCode(active ? (files[active] || "") : "");
+  els.input.value = active ? (inputs[active] || "") : "";
+  updateEditorEmptyState();
+  renderFileTabs();
+  renderSavedContests();
+  updateDrawerActiveItem();
 }
 
 function openTempFile(filename) {
@@ -2212,8 +2690,21 @@ function openTempFile(filename) {
     switchCodeFile(filename);
     return;
   }
-  // Leaving a contest (or a template view): restore the workspace files, then
-  // activate the requested file once they have loaded.
+  // Anonymous: restore the in-memory temp workspace (preserving the contest we
+  // leave), since there's no backend to reload from.
+  if (!isAuthed()) {
+    stashCurrentContext();
+    codeFileScope = "workspace";
+    activeContestDir = "";
+    activeContestId = "";
+    restoreContext("workspace");
+    if (els.language.value === "python") activePyFile = filename;
+    else activeCppFile = filename;
+    ensureTabOpen(filename);
+    renderCurrentContext();
+    return;
+  }
+  // Signed in: restore the workspace files from the account, then activate.
   saveCurrentState();
   if (els.language.value === "python") activePyFile = filename;
   else activeCppFile = filename;
@@ -2222,6 +2713,22 @@ function openTempFile(filename) {
 
 function currentFileNames() {
   return els.language.value === "python" ? pyFileNames : cppFileNames;
+}
+
+function currentOpenTabs() {
+  return els.language.value === "python" ? openPyTabs : openCppTabs;
+}
+
+function setCurrentOpenTabs(names) {
+  if (els.language.value === "python") openPyTabs = names;
+  else openCppTabs = names;
+}
+
+// Make sure a file is open as a tab (e.g. when picked from the drawer after it
+// was closed). Preserves existing tab order, appending if newly opened.
+function ensureTabOpen(filename) {
+  const tabs = currentOpenTabs();
+  if (!tabs.includes(filename)) setCurrentOpenTabs([...tabs, filename]);
 }
 
 function currentFiles() {
@@ -2275,7 +2782,12 @@ function renderFileTabs() {
   const fileNames = currentFileNames();
   const tabLabels = currentTabLabels();
   const extensionLabel = els.language.value === "python" ? "Python" : "C++";
-  for (const filename of fileNames) {
+  // Keep the active file open, then show open tabs in file-list order.
+  const activeFile = currentActiveFile();
+  if (activeFile && fileNames.includes(activeFile)) ensureTabOpen(activeFile);
+  const openSet = new Set(currentOpenTabs());
+  const tabsToShow = fileNames.filter((name) => openSet.has(name));
+  for (const filename of tabsToShow) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "file-tab";
@@ -2287,10 +2799,10 @@ function renderFileTabs() {
     const close = document.createElement("span");
     close.className = "tab-close";
     close.textContent = "×";
-    close.title = `Close ${filename}`;
+    close.title = `Close ${filename} (the file stays in the drawer)`;
     close.addEventListener("click", (event) => {
       event.stopPropagation();
-      closeCodeFile(filename);
+      closeTab(filename);
     });
     tab.append(label, close);
     tab.addEventListener("click", () => switchCodeFile(filename));
@@ -2306,7 +2818,77 @@ function renderFileTabs() {
   updateActiveFileTab();
 }
 
-async function closeCodeFile(filename) {
+// Close a tab: remove it from the open-tabs strip only. The file is NOT deleted
+// — it stays in the left drawer and can be reopened by clicking it there.
+function closeTab(filename) {
+  const isPython = els.language.value === "python";
+  const fileNames = isPython ? pyFileNames : cppFileNames;
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const activeFile = isPython ? activePyFile : activeCppFile;
+  if (filename === activeFile) {
+    clearTimeout(codeSaveTimer);
+    codeSaveTimer = null;
+  } else {
+    saveCurrentState();
+  }
+  const openTabs = currentOpenTabs();
+  const index = openTabs.indexOf(filename);
+  const remaining = openTabs.filter((name) => name !== filename);
+  setCurrentOpenTabs(remaining);
+  if (activeFile === filename) {
+    const nextActiveFile = remaining[Math.max(0, index - 1)] || remaining[0] || "";
+    if (isPython) activePyFile = nextActiveFile;
+    else activeCppFile = nextActiveFile;
+    setEditorCode(nextActiveFile ? files[nextActiveFile] : "");
+    els.input.value = nextActiveFile ? inputs[nextActiveFile] || "" : "";
+  }
+  renderFileTabs();
+  updateEditorEmptyState();
+  setStatus("Closed", "idle");
+  els.meta.textContent = `${filename} closed`;
+}
+
+// Remove a file's name from the relevant drawer cache (used after a non-active
+// delete/rename so the list reflects it without touching the live editor).
+function removeFromDrawerCache(ctx, replacement = null) {
+  if (ctx.scope === "contest") {
+    const entry = savedContests.find((c) => String(c.contestId) === String(ctx.contestId));
+    const list = entry && entry.files && entry.files[ctx.language];
+    if (list) {
+      const i = list.indexOf(ctx.filename);
+      if (i >= 0) { if (replacement) list[i] = replacement; else list.splice(i, 1); }
+    }
+  } else {
+    const apply = (arr) => {
+      const i = arr.indexOf(ctx.filename);
+      if (i >= 0) { if (replacement) arr[i] = replacement; else arr.splice(i, 1); }
+      return arr;
+    };
+    if (ctx.language === "python") tempPyNames = apply(tempPyNames.slice());
+    else tempCppNames = apply(tempCppNames.slice());
+  }
+}
+
+// Trash icon. Routes to the live-editor delete when the file is the active
+// context, otherwise deletes it straight from the backend + drawer cache (so you
+// can delete a contest file from the workspace, or a temp file from a contest).
+async function deleteDrawerFile(ctx) {
+  if (isActiveFileContext(ctx)) return deleteActiveFile(ctx.filename);
+  if (isAuthed()) {
+    await deleteMyFile(ctx.language, ctx.scope, ctx.filename, ctx.contestId || "").catch(() => {
+      els.meta.textContent = `Could not delete ${ctx.filename}`;
+    });
+  }
+  removeFromDrawerCache(ctx);
+  refreshDrawerAndTabs();
+  setStatus("Deleted", "idle");
+  els.meta.textContent = `${ctx.filename} deleted`;
+}
+
+// Permanently delete the file in the active editor context. Removes it from the
+// file list, the open tabs, and the backend (when signed in).
+async function deleteActiveFile(filename) {
   const isPython = els.language.value === "python";
   const fileNames = isPython ? pyFileNames : cppFileNames;
   const files = isPython ? pyFiles : cppFiles;
@@ -2324,6 +2906,7 @@ async function closeCodeFile(filename) {
   const nextFileNames = fileNames.filter((name) => name !== filename);
   if (isPython) pyFileNames = nextFileNames;
   else cppFileNames = nextFileNames;
+  setCurrentOpenTabs(currentOpenTabs().filter((name) => name !== filename));
   delete files[filename];
   delete inputs[filename];
   delete tabLabels[filename];
@@ -2334,6 +2917,10 @@ async function closeCodeFile(filename) {
     await remove(filename).catch(() => {
       els.meta.textContent = `Could not delete ${filename} from ${folderName}`;
     });
+  } else if (codeFileScope === "contest" && isAuthed() && activeContestId) {
+    await deleteMyFile(isPython ? "python" : "cpp", "contest", filename, activeContestId).catch(() => {
+      els.meta.textContent = `Could not delete ${filename}`;
+    });
   }
   if (activeFile === filename) {
     const nextActiveFile = nextFileNames[Math.max(0, index - 1)] || nextFileNames[0] || "";
@@ -2342,10 +2929,139 @@ async function closeCodeFile(filename) {
     setEditorCode(nextActiveFile ? files[nextActiveFile] : "");
     els.input.value = nextActiveFile ? inputs[nextActiveFile] || "" : "";
   }
-  renderFileTabs();
+  refreshDrawerAndTabs();
   updateEditorEmptyState();
-  setStatus("Closed", "idle");
-  els.meta.textContent = `${filename} closed`;
+  setStatus("Deleted", "idle");
+  els.meta.textContent = `${filename} deleted`;
+}
+
+// Turn a drawer file row into an inline rename field: the row becomes a focused
+// text input (empty, with the current name as a hint). Enter or clicking away
+// commits the typed name; Escape cancels. No browser prompt/confirm dialogs.
+function beginRenameInline(row, ctx) {
+  row.innerHTML = "";
+  row.classList.add("renaming");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "temp-file-rename-input";
+  input.value = "";
+  input.placeholder = ctx.filename;
+  input.spellcheck = false;
+  input.autocomplete = "off";
+  let settled = false;
+  const finish = (commit) => {
+    if (settled) return;
+    settled = true;
+    const raw = input.value.trim();
+    if (commit && raw) commitRename(ctx, raw);
+    else refreshDrawerAndTabs(); // cancel or empty → restore the row unchanged
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); finish(true); }
+    else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  row.append(input);
+  input.focus();
+}
+
+// Validate a typed rename (keeping the language extension), then route to the
+// live-editor rename when the file is active, or a backend rename otherwise.
+async function commitRename(ctx, raw) {
+  const extension = ctx.language === "python" ? ".py" : ".cpp";
+  let next = String(raw).trim();
+  if (!next) { refreshDrawerAndTabs(); return; }
+  if (!next.toLowerCase().endsWith(extension)) next += extension;
+  if (next === ctx.filename) { refreshDrawerAndTabs(); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(next.slice(0, -extension.length))) {
+    setStatus("Bad name", "error");
+    els.meta.textContent = "Use letters, digits, _ or - only";
+    refreshDrawerAndTabs();
+    return;
+  }
+  if (isActiveFileContext(ctx)) await commitActiveRename(ctx.filename, next);
+  else await renameNonActiveFile(ctx, next);
+}
+
+// Rename the file in the active editor context: move content/input/label across
+// the live arrays and re-point the backend (save new + delete old) when signed in.
+async function commitActiveRename(filename, next) {
+  const isPython = els.language.value === "python";
+  const fileNames = isPython ? pyFileNames : cppFileNames;
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const tabLabels = isPython ? pyTabLabels : cppTabLabels;
+  const problems = isPython ? pyProblems : cppProblems;
+  if (fileNames.includes(next)) {
+    setStatus("Name taken", "error");
+    els.meta.textContent = `${next} already exists`;
+    refreshDrawerAndTabs();
+    return;
+  }
+  saveCurrentState();
+  const content = files[filename] || "";
+  const input = inputs[filename] || "";
+  const at = fileNames.indexOf(filename);
+  if (at >= 0) fileNames[at] = next;
+  files[next] = content;
+  inputs[next] = input;
+  tabLabels[next] = next;
+  problems[next] = problems[filename] || null;
+  delete files[filename];
+  delete inputs[filename];
+  delete tabLabels[filename];
+  delete problems[filename];
+  setCurrentOpenTabs(currentOpenTabs().map((name) => (name === filename ? next : name)));
+  if ((isPython ? activePyFile : activeCppFile) === filename) {
+    if (isPython) activePyFile = next;
+    else activeCppFile = next;
+  }
+  if (codeFileScope === "workspace") {
+    const save = isPython ? saveWorkspacePythonFile : saveWorkspaceCppFile;
+    const remove = isPython ? deleteWorkspacePythonFile : deleteWorkspaceCppFile;
+    await save(next, content).catch(() => {});
+    await remove(filename).catch(() => {});
+  } else if (codeFileScope === "contest" && isAuthed() && activeContestId) {
+    const lang = isPython ? "python" : "cpp";
+    await putMyFile(lang, "contest", next, content, input, activeContestId).catch(() => {});
+    await deleteMyFile(lang, "contest", filename, activeContestId).catch(() => {});
+  }
+  refreshDrawerAndTabs();
+  setStatus("Renamed", "success");
+  els.meta.textContent = `${filename} → ${next}`;
+}
+
+// Rename a file that isn't in the active editor (e.g. a contest file while in the
+// workspace). Fetches its content from the account, writes it under the new name,
+// deletes the old, and updates the drawer cache. Signed-in only (anonymous files
+// that aren't active have no persisted content to move).
+async function renameNonActiveFile(ctx, next) {
+  if (!isAuthed()) { refreshDrawerAndTabs(); return; }
+  let content = "";
+  let input = "";
+  try {
+    const res = await fetch("/api/me/workspace", { cache: "no-store" });
+    const data = await res.json();
+    const match = (f) => f.scope === ctx.scope && String(f.contestId || "") === String(ctx.contestId || "") && f.language === ctx.language;
+    if ((data.files || []).some((f) => match(f) && f.filename === next)) {
+      setStatus("Name taken", "error");
+      els.meta.textContent = `${next} already exists`;
+      refreshDrawerAndTabs();
+      return;
+    }
+    const row = (data.files || []).find((f) => match(f) && f.filename === ctx.filename);
+    content = row ? (row.content || "") : "";
+    input = row ? (row.input || "") : "";
+  } catch {
+    refreshDrawerAndTabs();
+    return;
+  }
+  await putMyFile(ctx.language, ctx.scope, next, content, input, ctx.contestId || "").catch(() => {});
+  await deleteMyFile(ctx.language, ctx.scope, ctx.filename, ctx.contestId || "").catch(() => {});
+  removeFromDrawerCache(ctx, next);
+  refreshDrawerAndTabs();
+  setStatus("Renamed", "success");
+  els.meta.textContent = `${ctx.filename} → ${next}`;
 }
 
 function addNextCodeFile() {
@@ -2358,6 +3074,7 @@ function addNextCodeFile() {
   const problems = isPython ? pyProblems : cppProblems;
   if (isPython) pyFileNames.push(filename);
   else cppFileNames.push(filename);
+  ensureTabOpen(filename);
   files[filename] = isPython ? pythonCode : cppTemplate;
   inputs[filename] = "";
   tabLabels[filename] = filename;
@@ -2393,13 +3110,16 @@ function createFirstCppFile() {
 // switching out of any active contest into a fresh temporary workspace.
 function createFirstTempFile() {
   saveCurrentState();
+  // Preserve a contest we're leaving so it can be reopened from the drawer.
+  if (codeFileScope !== "workspace") stashCurrentContext();
   const isPython = els.language.value === "python";
   codeFileScope = "workspace";
   activeContestDir = "";
+  activeContestId = "";
   if (isPython) {
-    pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; tempPyNames = [];
+    pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; tempPyNames = []; openPyTabs = [];
   } else {
-    cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; tempCppNames = [];
+    cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; tempCppNames = []; openCppTabs = [];
   }
   addNextCodeFile();
   renderTempFiles();
@@ -2432,6 +3152,8 @@ function switchCodeFile(filename) {
   if (filename === activeFile && editorView === "code") return;
   endDebugSessionOnContextChange();
   const leavingTemplateView = editorView !== "code";
+  const wasOpen = currentOpenTabs().includes(filename);
+  ensureTabOpen(filename); // reopens a tab that was closed from the strip
   saveCurrentState();
   editorView = "code";
   if (isPython) activePyFile = filename;
@@ -2442,9 +3164,10 @@ function switchCodeFile(filename) {
   els.input.value = inputs[filename] || "";
   updateEditorEmptyState();
   updateDrawerActiveItem();
-  // Coming back from a template view, the tab strip still shows the template
-  // tabs — rebuild it into the code-file tabs; otherwise just move the highlight.
-  if (leavingTemplateView) renderFileTabs();
+  renderSavedContests(); // keep the open contest's active-file highlight in sync
+  // Coming back from a template view, or reopening a closed tab, rebuild the tab
+  // strip; otherwise just move the highlight.
+  if (leavingTemplateView || !wasOpen) renderFileTabs();
   else updateActiveFileTab();
   updateEditorActionButton();
   setStatus("Idle", "idle");
@@ -2509,6 +3232,42 @@ function updateContestChip() {
   els.contestNumberChip.textContent = number || "—";
 }
 
+// Collect the files already saved for a contest, as a {cpp:{...}, python:{...}}
+// map of filename -> {content, input}, used to merge on re-import so existing
+// work is preserved. Prefers the live in-memory contest (most current), then
+// the signed-in account; returns null when there's nothing to merge.
+async function loadExistingContestFiles(contestId) {
+  const cid = String(contestId || "");
+  if (!cid) return null;
+  if (codeFileScope === "contest" && String(activeContestId) === cid) {
+    const stored = { cpp: {}, python: {} };
+    for (const n of cppFileNames) stored.cpp[n] = { content: cppFiles[n] || "", input: cppInputs[n] || "" };
+    for (const n of pyFileNames) stored.python[n] = { content: pyFiles[n] || "", input: pyInputs[n] || "" };
+    return stored;
+  }
+  // In-memory snapshot (anonymous, contest not currently the open scope).
+  const snap = contextSnapshots.get(`contest:${cid}`);
+  if (snap) {
+    const stored = { cpp: {}, python: {} };
+    for (const n of snap.cpp.names) stored.cpp[n] = { content: snap.cpp.files[n] || "", input: snap.cpp.inputs[n] || "" };
+    for (const n of snap.python.names) stored.python[n] = { content: snap.python.files[n] || "", input: snap.python.inputs[n] || "" };
+    return stored;
+  }
+  if (!isAuthed()) return null;
+  const res = await fetch("/api/me/workspace", { cache: "no-store" });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const has = (data.contests || []).some((c) => String(c.contestId) === cid);
+  if (!has) return null;
+  const stored = { cpp: {}, python: {} };
+  for (const f of data.files || []) {
+    if (f.scope === "contest" && String(f.contestId) === cid) {
+      stored[f.language][f.filename] = { content: f.content || "", input: f.input || "" };
+    }
+  }
+  return stored;
+}
+
 async function importContest() {
   const contestUrl = els.contestUrl.value.trim();
   if (!contestUrl) {
@@ -2533,7 +3292,14 @@ async function importContest() {
     });
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || "Could not import contest.");
-    applyContestProblems(result);
+    // Re-importing is non-destructive: keep every file already saved for this
+    // contest (edits, renames, extras) and only (re)create the canonical problem
+    // files that are missing — e.g. ones you deleted or renamed away.
+    const existing = await loadExistingContestFiles(result.contestId).catch(() => null);
+    // Preserve the context we're leaving (e.g. temp files) in the in-memory store
+    // so an anonymous session can switch back to it after importing the contest.
+    if (!isAuthed()) stashCurrentContext();
+    applyContestProblems(result, existing ? { stored: existing } : {});
     recentContest = {
       url: contestUrl,
       name: result.name || contestUrl,
@@ -2543,6 +3309,7 @@ async function importContest() {
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
     scheduleAppSettingsSave();
     if (isAuthed()) {
+      await persistContestToAccount(result).catch(() => {});
       await loadSavedContestList();
     } else {
       addSessionContest(result); // show it in the drawer for this session only
@@ -2557,6 +3324,29 @@ async function importContest() {
   }
 }
 
+// Signed-in: persist a just-imported contest to the account — register it (with
+// its problem list) and store every problem file for BOTH languages, with the
+// fetched sample as the input. applyContestProblems has already populated the
+// in-memory file maps for both languages, so we save straight from those.
+async function persistContestToAccount(result) {
+  const contestId = String(result.contestId || "");
+  if (!contestId) return;
+  const problems = (result.problems || []).map((p) => ({ index: p.index, name: p.name || "" }));
+  await fetch("/api/me/contest", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contestId, name: result.name || "", language: els.language.value, problems })
+  });
+  const uploads = [];
+  for (const name of cppFileNames) {
+    uploads.push(putMyFile("cpp", "contest", name, cppFiles[name] || "", cppInputs[name] || "", contestId));
+  }
+  for (const name of pyFileNames) {
+    uploads.push(putMyFile("python", "contest", name, pyFiles[name] || "", pyInputs[name] || "", contestId));
+  }
+  await Promise.all(uploads);
+}
+
 // Anonymous: surface the just-imported contest in the drawer for the current
 // session (in-memory only — its files are already loaded; not persisted).
 function addSessionContest(result) {
@@ -2566,6 +3356,10 @@ function addSessionContest(result) {
     contestDir: result.files?.contestDir || "",
     problems: (result.problems || []).map((p) => ({ index: p.index, name: p.name })),
     problemCount: (result.problems || []).length,
+    files: {
+      cpp: (result.problems || []).map((p) => `${p.index}.cpp`),
+      python: (result.problems || []).map((p) => `${p.index}.py`)
+    },
     inMemory: true,
     savedAt: new Date().toISOString()
   };
@@ -2575,28 +3369,75 @@ function addSessionContest(result) {
 }
 
 function applyContestProblems(contest, options = {}) {
-  const { source = "import" } = options;
+  const { source = "import", stored = null, onlyStored = false } = options;
   const problems = contest.problems || [];
   const isPython = contest.files?.language === "python" || els.language.value === "python";
   const extension = isPython ? ".py" : ".cpp";
 
-  // Build files for BOTH languages so the contest has C++ and Python files; the
-  // imported language gets the fetched starter code, the other gets the template.
-  const buildLang = (ext, template, useFetchedCode) => ({
-    names: problems.map((p) => `${p.index}${ext}`),
-    files: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, useFetchedCode ? (p.code ?? template) : template])),
-    inputs: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, p.samples?.[0]?.input || ""])),
-    labels: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, `${p.index}${ext} - ${p.name}`])),
-    map: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, p]))
-  });
+  // Build files for BOTH languages. Two modes:
+  //  - onlyStored (reopening a saved contest): show EXACTLY the stored files, so
+  //    files you deleted stay gone — no canonical problem is recreated.
+  //  - otherwise (import / re-import): canonical problem files are (re)created
+  //    from fetched/template when missing, kept from `stored` when present, and
+  //    any extra stored files (renames, etc.) are appended.
+  const buildLang = (ext, template, useFetchedCode) => {
+    const lang = ext === ".py" ? "python" : "cpp";
+    const saved = stored?.[lang] || null;
+    const names = [];
+    const files = {};
+    const inputs = {};
+    const labels = {};
+    const map = {};
+    const labelByName = {};
+    const problemByName = {};
+    for (const p of problems) {
+      labelByName[`${p.index}${ext}`] = `${p.index}${ext} - ${p.name}`;
+      problemByName[`${p.index}${ext}`] = p;
+    }
+
+    if (onlyStored) {
+      for (const fn of Object.keys(saved || {})) {
+        names.push(fn);
+        files[fn] = saved[fn].content;
+        inputs[fn] = saved[fn].input || "";
+        labels[fn] = labelByName[fn] || fn;
+        map[fn] = problemByName[fn] || null;
+      }
+      return { names, files, inputs, labels, map };
+    }
+
+    for (const p of problems) {
+      const fn = `${p.index}${ext}`;
+      names.push(fn);
+      files[fn] = (saved && fn in saved) ? saved[fn].content : (useFetchedCode ? (p.code ?? template) : template);
+      inputs[fn] = (saved && fn in saved) ? (saved[fn].input || "") : (p.samples?.[0]?.input || "");
+      labels[fn] = `${p.index}${ext} - ${p.name}`;
+      map[fn] = p;
+    }
+    // Surface any extra stored files for this language that aren't canonical
+    // problems (e.g. "AImportedAfterLogin.cpp" merged in at login) as their own tabs.
+    if (saved) {
+      for (const fn of Object.keys(saved)) {
+        if (names.includes(fn) || !fn.endsWith(ext)) continue;
+        names.push(fn);
+        files[fn] = saved[fn].content;
+        inputs[fn] = saved[fn].input || "";
+        labels[fn] = fn;
+        map[fn] = null;
+      }
+    }
+    return { names, files, inputs, labels, map };
+  };
   const cpp = buildLang(".cpp", cppTemplate, !isPython);
   const py = buildLang(".py", pythonCode, isPython);
 
   codeFileScope = "contest";
   activeContestDir = contest.files?.contestDir || recentContest?.contestDir || "";
+  activeContestId = String(contest.contestId || recentContest?.contestId || "");
 
   cppFileNames = cpp.names; cppFiles = cpp.files; cppInputs = cpp.inputs; cppTabLabels = cpp.labels; cppProblems = cpp.map;
   pyFileNames = py.names; pyFiles = py.files; pyInputs = py.inputs; pyTabLabels = py.labels; pyProblems = py.map;
+  openCppTabs = cpp.names.slice(); openPyTabs = py.names.slice();
   activeCppFile = cppFileNames[0] || "A.cpp";
   activePyFile = pyFileNames[0] || "A.py";
   editorView = "code";
@@ -2633,6 +3474,10 @@ function applyContestProblems(contest, options = {}) {
   els.meta.textContent = contest.placeholder
     ? `${problems.length} placeholder files created · re-import when contest is live`
     : `${problems.length} problems ${source === "saved" ? "loaded" : "imported"} · ${sampleCount} sample inputs loaded`;
+  // Expand + re-render the drawer so the now-open contest shows its live files
+  // with rename/delete icons (instead of the plain problem buttons).
+  if (activeContestId) expandedContestKeys.add(activeContestId);
+  renderSavedContests();
   refreshCodeforcesStatus(false);
 }
 

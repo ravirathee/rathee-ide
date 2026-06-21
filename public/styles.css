@@ -890,6 +890,32 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+/* Contest header row: the expand/collapse button plus a hover delete icon. */
+.saved-contest-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.saved-contest-header .contest-toggle-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.contest-delete-btn {
+  display: none;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--panel-solid);
+  box-shadow: -8px 0 8px -4px var(--panel-solid);
+}
+
+.saved-contest-header:hover .contest-delete-btn {
+  display: inline-flex;
+}
+
 .saved-contest-btn {
   display: flex;
   align-items: center;
@@ -929,6 +955,7 @@ button:disabled {
 
 .contest-problem-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* constrain to drawer width so rows shrink/ellipsis */
   padding: 4px 0 6px 30px;
   background: var(--header-tint);
 }
@@ -961,6 +988,91 @@ button:disabled {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.12);
   font-weight: 600;
+}
+
+/* Drawer file row: name on the left, rename/delete icons on the right (shown on
+   hover). Reserve space for the icons so the name doesn't shift on hover. */
+.temp-file-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.temp-file-row .temp-file-btn {
+  flex: 1 1 auto;
+  min-width: 0; /* allow the name to shrink/ellipsis so the row never overflows */
+  width: auto;
+  padding-right: 8px;
+}
+
+.temp-file-actions {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  border-radius: 5px;
+  /* Solid backdrop so the icons stay readable over a truncated file name,
+     even when the drawer is narrow. */
+  background: var(--panel-solid);
+  box-shadow: -8px 0 8px -4px var(--panel-solid);
+}
+
+.temp-file-row:hover .temp-file-actions {
+  display: flex;
+}
+
+.temp-file-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 5px;
+  opacity: 0.75;
+  transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+}
+
+.temp-file-action svg {
+  display: block;
+}
+
+.temp-file-action:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.18);
+  opacity: 1;
+}
+
+.temp-file-delete:hover {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.16);
+  opacity: 1;
+}
+
+.temp-file-rename-input {
+  width: 100%;
+  margin: 2px 8px;
+  padding: 3px 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 5px;
+  background: var(--surface, rgba(0, 0, 0, 0.2));
+  color: var(--text, inherit);
+  font-size: 0.78rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.temp-file-rename-input::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
 }
 
 .temp-file-empty {
