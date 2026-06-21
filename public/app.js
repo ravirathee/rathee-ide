@@ -217,14 +217,10 @@ let layoutState = {
 loadAppSettings().finally(boot);
 
 async function loadAppSettings() {
-  try {
-    const res = await fetch(`/api/settings?ts=${Date.now()}`, { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load settings.");
-    applyAppSettings(data.settings || {});
-  } catch {
-    // localStorage defaults above keep older installs working if the settings file is unavailable.
-  }
+  // No global settings fetch: signed-in users load their settings from their
+  // account (see initAuth); anonymous sessions use local defaults and persist
+  // nothing. Local device prefs (theme/zoom/font) still come from localStorage.
+  return;
 }
 
 function applyAppSettings(settings) {
@@ -506,12 +502,13 @@ function addAutoCompletionRuleFromInputs(triggerInput, templateInput) {
 function scheduleAppSettingsSave() {
   clearTimeout(settingsSaveTimer);
   settingsSaveTimer = setTimeout(() => {
-    fetch("/api/settings", {
-      method: "POST",
+    if (!isAuthed()) return; // anonymous: settings are not persisted server-side
+    fetch("/api/me/settings", {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ settings: currentAppSettings() })
     }).catch(() => {
-      // Settings still remain active in memory if the file write fails.
+      // Settings still remain active in memory if the save fails.
     });
   }, 250);
 }
@@ -682,11 +679,53 @@ async function initAuth(justLoggedIn = false) {
   // On sign-in, the files you were just working on (temporary/in-memory) win:
   // upload them to the account, overwriting the account's versions of the same
   // files, so logging in never loses your current work.
-  if (isAuthed() && justLoggedIn) {
-    await uploadLocalFilesToAccount().catch(() => {});
+  if (isAuthed()) {
+    if (justLoggedIn) await uploadLocalFilesToAccount().catch(() => {});
+    await applyAccountSettingsAndTemplates(justLoggedIn).catch(() => {});
   }
   // Reload the scratch workspace from the right backend now auth is known.
   await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
+  loadSavedContestList(); // empty when anonymous; the saved list when signed in
+}
+
+// Load the signed-in user's settings + templates from their account and apply
+// them; if their account has none yet (first login), seed it from the current
+// (anonymous) values so nothing is lost.
+async function applyAccountSettingsAndTemplates(justLoggedIn) {
+  const res = await fetch("/api/me/workspace", { cache: "no-store" });
+  if (!res.ok) return;
+  const data = await res.json();
+
+  if (data.settings && Object.keys(data.settings).length) {
+    applyAppSettings(data.settings);
+    reapplyAllSettings();
+  } else if (justLoggedIn) {
+    scheduleAppSettingsSave(); // seed account settings from current values
+  }
+
+  const t = data.templates || {};
+  if (t.cpp_template || t.headers || t.python_template) {
+    if (typeof t.cpp_template === "string") cppTemplate = t.cpp_template;
+    if (typeof t.headers === "string") cppHeaders = t.headers;
+    if (typeof t.python_template === "string") pythonCode = t.python_template;
+    if (editorView === "template") setEditorCode(cppTemplate);
+    else if (editorView === "headers") setEditorCode(cppHeaders);
+    else if (editorView === "python-template") setEditorCode(pythonCode);
+  } else if (justLoggedIn) {
+    saveTemplateFilesNow().catch(() => {}); // seed account templates from current
+  }
+}
+
+// Re-apply settings to the UI after loading a different user's settings.
+function reapplyAllSettings() {
+  applyAppearance();
+  applyWorkspaceLayout();
+  setEditorFontSize(editorFontSize);
+  setEditorFontFamily(editorFontFamily);
+  renderAutoCompletionSettings();
+  setCodeforcesHandle(codeforcesHandle);
+  els.quickLanguage.value = els.language.value;
+  loadCodeforcesProfile();
 }
 
 async function uploadLocalFilesToAccount() {
@@ -803,9 +842,9 @@ async function logout() {
   }
   authState.user = null;
   renderAuth();
-  // Keep the current files on screen after logout (don't switch to a different
-  // workspace). The session is ended; the visible files just stop syncing to
-  // the account until you sign back in.
+  loadSavedContestList(); // clears the saved-contest list (anonymous shows none)
+  // Keep the current code files on screen after logout (don't switch to a
+  // different workspace). The session is ended; they just stop syncing.
 }
 
 // Show a "Save" nudge for anonymous users editing code; signing in is what
@@ -831,22 +870,17 @@ async function loadWorkspaceFiles() {
   }
 }
 
-// Scratch files: signed-in users read from their account (DB); anonymous users
-// use the legacy shared endpoint (per-user browser storage comes in a later step).
+// Scratch files: signed-in users read from their account (DB). Anonymous users
+// persist nothing, so they always start with an empty workspace (reset on every
+// refresh) — work is kept only if/when they sign in.
 async function fetchScratchFiles(language) {
-  if (isAuthed()) {
-    const res = await fetch("/api/me/workspace", { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load your files.");
-    return (data.files || [])
-      .filter((f) => f.language === language && f.scope === "scratch")
-      .map((f) => ({ filename: f.filename, code: f.content || "", input: f.input || "" }));
-  }
-  const endpoint = language === "python" ? "workspace-python-files" : "workspace-cpp-files";
-  const res = await fetch(`/api/${endpoint}?ts=${Date.now()}`, { cache: "no-store" });
+  if (!isAuthed()) return [];
+  const res = await fetch("/api/me/workspace", { cache: "no-store" });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Could not load workspace files.");
-  return (data.files || []).map((f) => ({ filename: f.filename, code: f.code || "", input: "" }));
+  if (!res.ok) throw new Error(data.error || "Could not load your files.");
+  return (data.files || [])
+    .filter((f) => f.language === language && f.scope === "scratch")
+    .map((f) => ({ filename: f.filename, code: f.content || "", input: f.input || "" }));
 }
 
 async function loadWorkspaceCppFiles() {
@@ -902,31 +936,17 @@ async function loadWorkspacePythonFiles() {
 }
 
 async function saveWorkspaceCppFile(filename, code) {
-  if (isAuthed()) {
-    await putMyFile("cpp", "scratch", filename, code, cppInputs[filename] || "");
-    return;
-  }
-  await fetch("/api/workspace-cpp-files", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, code })
-  });
+  if (!isAuthed()) return; // anonymous: nothing is persisted
+  await putMyFile("cpp", "scratch", filename, code, cppInputs[filename] || "");
 }
 
 async function saveWorkspacePythonFile(filename, code) {
-  if (isAuthed()) {
-    await putMyFile("python", "scratch", filename, code, pyInputs[filename] || "");
-    return;
-  }
-  await fetch("/api/workspace-python-files", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, code })
-  });
+  if (!isAuthed()) return; // anonymous: nothing is persisted
+  await putMyFile("python", "scratch", filename, code, pyInputs[filename] || "");
 }
 
 async function saveContestCppFile(filename, code) {
-  if (!activeContestDir) return;
+  if (!activeContestDir || !isAuthed()) return; // anonymous: nothing is persisted
   await fetch("/api/codeforces/contest-file", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -935,7 +955,7 @@ async function saveContestCppFile(filename, code) {
 }
 
 async function saveContestPythonFile(filename, code) {
-  if (!activeContestDir) return;
+  if (!activeContestDir || !isAuthed()) return; // anonymous: nothing is persisted
   await fetch("/api/codeforces/contest-file", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -961,23 +981,13 @@ function scheduleWorkspaceCodeSave() {
 }
 
 async function deleteWorkspaceCppFile(filename) {
-  if (isAuthed()) {
-    await deleteMyFile("cpp", "scratch", filename);
-    return;
-  }
-  await fetch(`/api/workspace-cpp-files?filename=${encodeURIComponent(filename)}`, {
-    method: "DELETE"
-  });
+  if (!isAuthed()) return; // anonymous: nothing is persisted
+  await deleteMyFile("cpp", "scratch", filename);
 }
 
 async function deleteWorkspacePythonFile(filename) {
-  if (isAuthed()) {
-    await deleteMyFile("python", "scratch", filename);
-    return;
-  }
-  await fetch(`/api/workspace-python-files?filename=${encodeURIComponent(filename)}`, {
-    method: "DELETE"
-  });
+  if (!isAuthed()) return; // anonymous: nothing is persisted
+  await deleteMyFile("python", "scratch", filename);
 }
 
 function deleteMyFile(language, scope, filename) {
@@ -994,14 +1004,21 @@ async function loadTemplateFiles() {
 
 async function reloadTemplateFilesFromWorkspace({ updateVisible, resetDirty }) {
   try {
-    const res = await fetch(`/api/template-files?ts=${Date.now()}`, {
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache"
-      }
-    });
-    if (!res.ok) throw new Error("Template file load failed.");
-    const files = await res.json();
+    let files;
+    if (isAuthed()) {
+      const res = await fetch("/api/me/workspace", { cache: "no-store" });
+      if (!res.ok) throw new Error("Template load failed.");
+      const data = await res.json();
+      const t = data.templates || {};
+      files = { template: t.cpp_template, headers: t.headers, python: t.python_template };
+    } else {
+      const res = await fetch(`/api/template-files?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
+      if (!res.ok) throw new Error("Template file load failed.");
+      files = await res.json();
+    }
     if (typeof files.template === "string") cppTemplate = files.template;
     if (typeof files.headers === "string") cppHeaders = files.headers;
     if (typeof files.python === "string") pythonCode = files.python;
@@ -1018,10 +1035,19 @@ async function reloadTemplateFilesFromWorkspace({ updateVisible, resetDirty }) {
 }
 
 async function saveTemplateFilesNow() {
-  await fetch("/api/template-files", {
-    method: "POST",
+  if (!isAuthed()) return; // anonymous: templates are read-only defaults, not saved
+  await Promise.all([
+    putMyTemplate("cpp_template", cppTemplate),
+    putMyTemplate("headers", cppHeaders),
+    putMyTemplate("python_template", pythonCode)
+  ]);
+}
+
+function putMyTemplate(kind, content) {
+  return fetch("/api/me/template", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ template: cppTemplate, headers: cppHeaders, python: pythonCode })
+    body: JSON.stringify({ kind, content: content || "" })
   });
 }
 
@@ -1927,6 +1953,13 @@ function showDrawer(visible) {
 }
 
 async function loadSavedContestList() {
+  // Anonymous: keep only this session's in-memory (just-imported) contest;
+  // nothing is loaded from the server, and it's gone on refresh.
+  if (!isAuthed()) {
+    savedContests = savedContests.filter((c) => c.inMemory);
+    renderSavedContests();
+    return;
+  }
   try {
     const res = await fetch(`/api/codeforces/contests?ts=${Date.now()}`, { cache: "no-store" });
     const data = await res.json();
@@ -2039,6 +2072,13 @@ function shortenContestName(name) {
 }
 
 async function loadSavedContest(contest, targetProblemIndex = "") {
+  if (contest?.inMemory) {
+    // Anonymous session contest: files are already loaded — just switch problem.
+    const ext = els.language.value === "python" ? ".py" : ".cpp";
+    const fn = targetProblemIndex ? `${targetProblemIndex}${ext}` : "";
+    if (fn && currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+    return;
+  }
   if (!contest?.contestDir && !contest?.contestId) return;
   if (contest.contestId) {
     els.contestUrl.value = `https://codeforces.com/contest/${contest.contestId}`;
@@ -2135,10 +2175,20 @@ function renderTempFiles() {
   }
   const names = els.language.value === "python" ? tempPyNames : tempCppNames;
   if (!names.length) {
-    const empty = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "temp-file-empty-row";
+    const empty = document.createElement("span");
     empty.className = "temp-file-empty";
     empty.textContent = "No files yet";
-    els.tempFileList.append(empty);
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "temp-create-file";
+    const name = els.language.value === "python" ? "A.py" : "A.cpp";
+    create.textContent = `+ ${name}`;
+    create.title = `Create ${name}`;
+    create.addEventListener("click", createFirstTempFile);
+    row.append(empty, create);
+    els.tempFileList.append(row);
     return;
   }
 
@@ -2339,6 +2389,22 @@ function createFirstCppFile() {
   }
 }
 
+// Create the first temporary (scratch) file from the drawer's empty state,
+// switching out of any active contest into a fresh temporary workspace.
+function createFirstTempFile() {
+  saveCurrentState();
+  const isPython = els.language.value === "python";
+  codeFileScope = "workspace";
+  activeContestDir = "";
+  if (isPython) {
+    pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; tempPyNames = [];
+  } else {
+    cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; tempCppNames = [];
+  }
+  addNextCodeFile();
+  renderTempFiles();
+}
+
 function nextCodeFilename(fileNames, extension) {
   const used = new Set(fileNames);
   let index = 1;
@@ -2476,7 +2542,11 @@ async function importContest() {
     };
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
     scheduleAppSettingsSave();
-    await loadSavedContestList();
+    if (isAuthed()) {
+      await loadSavedContestList();
+    } else {
+      addSessionContest(result); // show it in the drawer for this session only
+    }
   } catch (error) {
     setDebuggerOutput(error.message);
     setStatus("Import failed", "error");
@@ -2487,46 +2557,48 @@ async function importContest() {
   }
 }
 
+// Anonymous: surface the just-imported contest in the drawer for the current
+// session (in-memory only — its files are already loaded; not persisted).
+function addSessionContest(result) {
+  const entry = {
+    name: result.name || els.contestUrl.value.trim(),
+    contestId: result.contestId || "",
+    contestDir: result.files?.contestDir || "",
+    problems: (result.problems || []).map((p) => ({ index: p.index, name: p.name })),
+    problemCount: (result.problems || []).length,
+    inMemory: true,
+    savedAt: new Date().toISOString()
+  };
+  savedContests = [entry]; // one active contest's files live in memory at a time
+  expandedContestKeys.add(contestKeyFor(entry));
+  renderSavedContests();
+}
+
 function applyContestProblems(contest, options = {}) {
   const { source = "import" } = options;
   const problems = contest.problems || [];
   const isPython = contest.files?.language === "python" || els.language.value === "python";
   const extension = isPython ? ".py" : ".cpp";
-  const template = isPython ? pythonCode : cppTemplate;
+
+  // Build files for BOTH languages so the contest has C++ and Python files; the
+  // imported language gets the fetched starter code, the other gets the template.
+  const buildLang = (ext, template, useFetchedCode) => ({
+    names: problems.map((p) => `${p.index}${ext}`),
+    files: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, useFetchedCode ? (p.code ?? template) : template])),
+    inputs: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, p.samples?.[0]?.input || ""])),
+    labels: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, `${p.index}${ext} - ${p.name}`])),
+    map: Object.fromEntries(problems.map((p) => [`${p.index}${ext}`, p]))
+  });
+  const cpp = buildLang(".cpp", cppTemplate, !isPython);
+  const py = buildLang(".py", pythonCode, isPython);
+
   codeFileScope = "contest";
   activeContestDir = contest.files?.contestDir || recentContest?.contestDir || "";
-  const fileNames = problems.map((problem) => `${problem.index}${extension}`);
-  const files = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}${extension}`,
-    problem.code ?? template
-  ]));
-  const inputs = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}${extension}`,
-    problem.samples?.[0]?.input || ""
-  ]));
-  const tabLabels = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}${extension}`,
-    `${problem.index}${extension} - ${problem.name}`
-  ]));
-  const problemMap = Object.fromEntries(problems.map((problem) => [
-    `${problem.index}${extension}`,
-    problem
-  ]));
-  if (isPython) {
-    pyFileNames = fileNames;
-    pyFiles = files;
-    pyInputs = inputs;
-    pyTabLabels = tabLabels;
-    pyProblems = problemMap;
-    activePyFile = pyFileNames[0] || "A.py";
-  } else {
-    cppFileNames = fileNames;
-    cppFiles = files;
-    cppInputs = inputs;
-    cppTabLabels = tabLabels;
-    cppProblems = problemMap;
-    activeCppFile = cppFileNames[0] || "A.cpp";
-  }
+
+  cppFileNames = cpp.names; cppFiles = cpp.files; cppInputs = cpp.inputs; cppTabLabels = cpp.labels; cppProblems = cpp.map;
+  pyFileNames = py.names; pyFiles = py.files; pyInputs = py.inputs; pyTabLabels = py.labels; pyProblems = py.map;
+  activeCppFile = cppFileNames[0] || "A.cpp";
+  activePyFile = pyFileNames[0] || "A.py";
   editorView = "code";
 
   els.language.value = isPython ? "python" : "cpp";
@@ -2537,8 +2609,10 @@ function applyContestProblems(contest, options = {}) {
   els.fileTabs.classList.toggle("python-mode", isPython);
   setEditorLanguage(els.language.value);
   const activeFile = isPython ? activePyFile : activeCppFile;
-  setEditorCode(files[activeFile] || template);
-  els.input.value = inputs[activeFile] || "";
+  const activeFiles = isPython ? pyFiles : cppFiles;
+  const activeInputs = isPython ? pyInputs : cppInputs;
+  setEditorCode(activeFiles[activeFile] || (isPython ? pythonCode : cppTemplate));
+  els.input.value = activeInputs[activeFile] || "";
   updateEditorEmptyState();
   els.output.value = "";
   const sampleCount = problems.filter((problem) => problem.samples?.length).length;

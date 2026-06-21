@@ -3156,3 +3156,27 @@ textarea,
 .save-files-button:hover {
   background: rgba(var(--accent-rgb), 0.18);
 }
+
+/* Empty Temporary Code Files state: "No files yet" + a small create button. */
+.temp-file-empty-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.temp-create-file {
+  flex: 0 0 auto;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.temp-create-file:hover {
+  background: rgba(var(--accent-rgb), 0.2);
+}
