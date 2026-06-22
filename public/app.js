@@ -678,7 +678,6 @@ function boot() {
   updateEditorActionButton();
   updateEditorEmptyState();
   loadSavedContestList();
-  loadWorkspaceFiles();
   loadTemplateFiles();
   // initAuth determines who's signed in, THEN loads the workspace once from the
   // correct backend (account DB vs anonymous). Doing the workspace load only
@@ -1056,15 +1055,6 @@ function promptLoginToSave() {
   toggleProfileMenu(true); // reveal the dropdown with the Google sign-in button
 }
 
-async function loadWorkspaceFiles() {
-  try {
-    const res = await fetch("/api/files");
-    const files = await res.json();
-    if (files.output) els.output.value = files.output;
-  } catch {
-    // The editor still works if previous run files are unavailable.
-  }
-}
 
 // Scratch files: signed-in users read from their account (DB). Anonymous users
 // persist nothing, so they always start with an empty workspace (reset on every
@@ -2446,50 +2436,6 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
   }
   if (contest?.account || (isAuthed() && contest?.contestId)) {
     await openAccountContest(contest, targetProblemIndex);
-    return;
-  }
-  if (!contest?.contestDir && !contest?.contestId) return;
-  if (contest.contestId) {
-    els.contestUrl.value = `https://codeforces.com/contest/${contest.contestId}`;
-    updateContestChip();
-  }
-  saveCurrentState();
-  setImportBusy(true);
-  setStatus("Loading", "idle");
-  els.meta.textContent = "Loading saved contest from workspace...";
-
-  try {
-    const params = new URLSearchParams({
-      language: els.language.value,
-      contestDir: contest.contestDir || "",
-      contestId: contest.contestId || ""
-    });
-    const res = await fetch(`/api/codeforces/contest?${params}`, { cache: "no-store" });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || "Could not load saved contest.");
-    recentContest = {
-      url: contest.contestId ? `https://codeforces.com/contest/${contest.contestId}` : "",
-      name: result.name || contest.name,
-      contestId: result.contestId || contest.contestId,
-      contestDir: result.files?.contestDir || contest.contestDir || ""
-    };
-    localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
-    scheduleAppSettingsSave();
-    applyContestProblems(result, { source: "saved" });
-    if (targetProblemIndex) {
-      const extension = els.language.value === "python" ? ".py" : ".cpp";
-      const targetFilename = `${targetProblemIndex}${extension}`;
-      if (currentFileNames().includes(targetFilename) && currentActiveFile() !== targetFilename) {
-        switchCodeFile(targetFilename);
-      }
-    }
-  } catch (error) {
-    setDebuggerOutput(error.message);
-    setStatus("Load failed", "error");
-    els.meta.textContent = "Saved contest could not be loaded from workspace";
-    showDebug(true);
-  } finally {
-    setImportBusy(false);
   }
 }
 

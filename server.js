@@ -27,8 +27,6 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
 const workspaceDir = path.join(__dirname, "workspace");
-const temporaryCppFilesDir = path.join(workspaceDir, "TemporaryCPPFiles");
-const temporaryPythonFilesDir = path.join(workspaceDir, "TemporaryPythonFiles");
 const templatesDir = path.join(workspaceDir, "Templates");
 const ioFilesDir = path.join(workspaceDir, "IOFiles");
 const inputFilePath = path.join(ioFilesDir, "input.txt");
@@ -42,10 +40,6 @@ const legacyTemplateCppPath = path.join(workspaceDir, "Template.cpp");
 const legacyHeadersPath = path.join(workspaceDir, "Headers.hpp");
 const legacyTemplatePythonPath = path.join(workspaceDir, "Template.py");
 const appSettingsPath = path.join(workspaceDir, "AppSettings.json");
-const contestPythonDirName = "zPY";
-const contestDataDirName = "zContestData";
-const legacyContestPythonDirNames = ["py", "PythonFiles", "PythodCode"];
-const legacyContestDataDirNames = ["contestData"];
 const port = Number(process.env.PORT || 4173);
 const maxBodyBytes = 1024 * 1024;
 const runTimeoutMs = 8000;
@@ -86,14 +80,17 @@ function sandbox(command, args, runDir, { name } = {}) {
     "--memory=256m", "--memory-swap=256m", "--cpus=1", "--pids-limit=128",
     "--read-only", "--tmpfs", "/tmp:exec,size=64m",
     "--cap-drop=ALL",
+    "--security-opt", "no-new-privileges",
     "--user", "1000:1000",
     "-v", `${runDir}:${containerWork}`,
     "-w", containerWork
   ];
   if (command === "lldb") {
-    // lldb needs ptrace to control the inferior; the default seccomp profile
-    // blocks it. Relax seccomp for this one container only — it still has no
-    // network, a read-only/ephemeral FS, and is destroyed on exit.
+    // lldb needs ptrace to control the inferior; the default seccomp profile can
+    // block it. Relax seccomp for this one container only — it still has no
+    // network, a read-only/ephemeral FS, runs non-root with no-new-privileges,
+    // and is destroyed on exit. (A tighter default-seccomp+SYS_PTRACE profile is
+    // possible but must be validated on the x86_64 prod host before switching.)
     flags.push("--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined");
   }
   if (name) flags.push("--name", name);
@@ -167,8 +164,6 @@ const mime = {
 };
 
 await Promise.all([
-  mkdir(temporaryCppFilesDir, { recursive: true }),
-  mkdir(temporaryPythonFilesDir, { recursive: true }),
   mkdir(templatesDir, { recursive: true }),
   mkdir(ioFilesDir, { recursive: true })
 ]);
@@ -390,44 +385,6 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
-    if (req.method === "GET" && url.pathname === "/api/workspace-cpp-files") {
-      const files = await listWorkspaceCodeFiles({ directory: temporaryCppFilesDir, extension: ".cpp" });
-      return sendJson(res, 200, { files });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/workspace-cpp-files") {
-      const body = await readJsonBody(req);
-      const filename = safeWorkspaceCppFilename(body.filename);
-      await mkdir(temporaryCppFilesDir, { recursive: true });
-      await writeFile(path.join(temporaryCppFilesDir, filename), String(body.code ?? ""), "utf8");
-      return sendJson(res, 200, { ok: true, filename });
-    }
-
-    if (req.method === "DELETE" && url.pathname === "/api/workspace-cpp-files") {
-      const filename = safeWorkspaceCppFilename(url.searchParams.get("filename") || "");
-      await rm(path.join(temporaryCppFilesDir, filename), { force: true });
-      return sendJson(res, 200, { ok: true, filename });
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/workspace-python-files") {
-      const files = await listWorkspaceCodeFiles({ directory: temporaryPythonFilesDir, extension: ".py" });
-      return sendJson(res, 200, { files });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/workspace-python-files") {
-      const body = await readJsonBody(req);
-      const filename = safeWorkspacePythonFilename(body.filename);
-      await mkdir(temporaryPythonFilesDir, { recursive: true });
-      await writeFile(path.join(temporaryPythonFilesDir, filename), String(body.code ?? ""), "utf8");
-      return sendJson(res, 200, { ok: true, filename });
-    }
-
-    if (req.method === "DELETE" && url.pathname === "/api/workspace-python-files") {
-      const filename = safeWorkspacePythonFilename(url.searchParams.get("filename") || "");
-      await rm(path.join(temporaryPythonFilesDir, filename), { force: true });
-      return sendJson(res, 200, { ok: true, filename });
-    }
-
     if (req.method === "POST" && url.pathname === "/api/codeforces/problems") {
       const body = await readJsonBody(req);
       const result = await fetchCodeforcesProblems(body.url);
@@ -454,35 +411,6 @@ const server = http.createServer(async (req, res) => {
         if (problem.code == null || problem.code === "") problem.code = starter;
       }
       return sendJson(res, 200, result);
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/codeforces/contest") {
-      const result = await loadSavedContest({
-        contestDir: url.searchParams.get("contestDir") || "",
-        contestId: url.searchParams.get("contestId") || "",
-        language: url.searchParams.get("language") || "cpp"
-      });
-      return sendJson(res, 200, result);
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/codeforces/contests") {
-      const contests = await listSavedContests();
-      return sendJson(res, 200, { contests });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/codeforces/contest-file") {
-      const body = await readJsonBody(req);
-      const contestPath = await resolveSavedContestDir({
-        contestDir: body.contestDir || "",
-        contestId: body.contestId || ""
-      });
-      const filename = safeContestCodeFilename(body.filename);
-      const fileRoot = filename.endsWith(".py")
-        ? path.join(contestPath, contestPythonDirName)
-        : contestPath;
-      await mkdir(fileRoot, { recursive: true });
-      await writeFile(path.join(fileRoot, filename), String(body.code ?? ""), "utf8");
-      return sendJson(res, 200, { ok: true, filename });
     }
 
     if (req.method === "GET" && url.pathname === "/api/codeforces/status") {
@@ -572,64 +500,6 @@ async function readTemplateBundle() {
 async function readTextWithFallback(primaryPath, fallbackPath) {
   const primary = await readTextIfExists(primaryPath);
   return primary || readTextIfExists(fallbackPath);
-}
-
-async function listWorkspaceCodeFiles({ directory, extension }) {
-  await mkdir(directory, { recursive: true });
-  const entries = await readdir(directory, { withFileTypes: true });
-  const names = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => isSafeWorkspaceCodeFilename(name, extension));
-
-  const files = await Promise.all(names.sort(compareCppFilenames).map(async (filename) => ({
-    filename,
-    code: await readTextIfExists(path.join(directory, filename))
-  })));
-  return files;
-}
-
-function safeWorkspaceCppFilename(filename) {
-  if (!isSafeWorkspaceCodeFilename(filename, ".cpp")) {
-    throw new Error("Invalid workspace C++ filename.");
-  }
-  return filename;
-}
-
-function safeWorkspacePythonFilename(filename) {
-  if (!isSafeWorkspaceCodeFilename(filename, ".py")) {
-    throw new Error("Invalid workspace Python filename.");
-  }
-  return filename;
-}
-
-function safeContestCodeFilename(filename) {
-  const value = String(filename || "");
-  if (
-    !/^[A-Za-z0-9_-]+\.(cpp|py)$/.test(value) ||
-    value.startsWith(".") ||
-    value.includes("/") ||
-    value.includes("\\") ||
-    value.includes("\0")
-  ) {
-    throw new Error("Invalid contest code filename.");
-  }
-  return value;
-}
-
-function isSafeWorkspaceCodeFilename(filename, extension) {
-  return typeof filename === "string"
-    && filename.endsWith(extension)
-    && !filename.startsWith(".")
-    && !filename.includes("/")
-    && !filename.includes("\\")
-    && !filename.includes("\0");
-}
-
-function compareCppFilenames(a, b) {
-  const aBase = a.replace(/\.cpp$/, "");
-  const bBase = b.replace(/\.cpp$/, "");
-  return aBase.localeCompare(bBase, undefined, { numeric: true, sensitivity: "base" });
 }
 
 // Pull the problem index (A, B, F1, ...) out of a Codeforces problem URL.
@@ -923,260 +793,6 @@ async function fetchCodeforcesContestCount(handle) {
 
   const cutoff = Math.floor((Date.now() - sixMonthsMs) / 1000);
   return data.result.filter((entry) => (entry.ratingUpdateTimeSeconds || 0) >= cutoff).length;
-}
-
-async function materializeContestFiles(contest, { language, templates }) {
-  const contestRoot = path.join(workspaceDir, "contests");
-  const contestFolderName = safeFolderName(`${contest.contestId}-${contest.name}`);
-  const contestDir = path.join(contestRoot, contestFolderName);
-  await mkdir(contestDir, { recursive: true });
-  const previousMetadata = await readContestMetadata(contestDir);
-  await writeContestMetadata(contestDir, contest);
-
-  const selectedLanguage = language === "python" ? "python" : "cpp";
-  if (selectedLanguage === "python") {
-    const pythonDir = path.join(contestDir, contestPythonDirName);
-    await mkdir(pythonDir, { recursive: true });
-    if (previousMetadata.placeholder && !contest.placeholder) {
-      await migratePlaceholderFiles({ problems: contest.problems, fileRoot: pythonDir, extension: ".py" });
-    }
-    const files = await Promise.all(contest.problems.map((problem) => {
-      const filename = `${safeProblemIndex(problem.index)}.py`;
-      const filePath = path.join(pythonDir, filename);
-      return writeFileIfMissing(filePath, String(templates.python || "")).then(() => ({
-        problem: problem.index,
-        path: path.relative(workspaceDir, filePath)
-      }));
-    }));
-    return { language: selectedLanguage, contestDir: path.relative(workspaceDir, contestDir), files };
-  }
-
-  if (previousMetadata.placeholder && !contest.placeholder) {
-    await migratePlaceholderFiles({ problems: contest.problems, fileRoot: contestDir, extension: ".cpp" });
-  }
-  const files = await Promise.all(contest.problems.map((problem) => {
-    const filename = `${safeProblemIndex(problem.index)}.cpp`;
-    const filePath = path.join(contestDir, filename);
-    return writeFileIfMissing(filePath, String(templates.template || "")).then(() => ({
-      problem: problem.index,
-      path: path.relative(workspaceDir, filePath)
-    }));
-  }));
-  return { language: selectedLanguage, contestDir: path.relative(workspaceDir, contestDir), files };
-}
-
-async function writeFileIfMissing(filePath, contents) {
-  const exists = await stat(filePath).then((value) => value.isFile()).catch(() => false);
-  if (!exists) {
-    await writeFile(filePath, contents, "utf8");
-  }
-}
-
-async function migratePlaceholderFiles({ problems, fileRoot, extension }) {
-  const placeholderIndexes = ["A", "B", "C", "D", "E", "F", "G"];
-  await Promise.all((problems || []).map(async (problem, position) => {
-    const placeholderIndex = placeholderIndexes[position];
-    if (!placeholderIndex || placeholderIndex === problem.index) return;
-    const from = path.join(fileRoot, `${placeholderIndex}${extension}`);
-    const to = path.join(fileRoot, `${safeProblemIndex(problem.index)}${extension}`);
-    const [fromExists, toExists] = await Promise.all([
-      stat(from).then((value) => value.isFile()).catch(() => false),
-      stat(to).then((value) => value.isFile()).catch(() => false)
-    ]);
-    if (fromExists && !toExists) {
-      await rename(from, to);
-    }
-  }));
-}
-
-async function writeContestMetadata(contestDir, contest) {
-  const contestDataDir = path.join(contestDir, contestDataDirName);
-  await mkdir(contestDataDir, { recursive: true });
-  const metadata = {
-    contestId: contest.contestId,
-    name: contest.name,
-    phase: contest.phase || "",
-    placeholder: Boolean(contest.placeholder),
-    message: contest.message || "",
-    problems: contest.problems || [],
-    savedAt: new Date().toISOString()
-  };
-  await writeFile(path.join(contestDataDir, "contest.json"), JSON.stringify(metadata, null, 2), "utf8");
-}
-
-async function loadSavedContest({ contestDir, contestId, language }) {
-  const contestPath = await resolveSavedContestDir({ contestDir, contestId });
-  const metadata = await readContestMetadata(contestPath);
-  const selectedLanguage = language === "python" ? "python" : "cpp";
-  const fileRoot = selectedLanguage === "python" ? await resolveContestPythonDir(contestPath) : contestPath;
-  const extension = selectedLanguage === "python" ? ".py" : ".cpp";
-
-  const problems = await Promise.all((metadata.problems || []).map(async (problem) => {
-    const filename = `${safeProblemIndex(problem.index)}${extension}`;
-    return {
-      ...problem,
-      filename,
-      code: await readTextIfExists(path.join(fileRoot, filename))
-    };
-  }));
-
-  return {
-    contestId: metadata.contestId,
-    name: metadata.name,
-    phase: metadata.phase || "",
-    placeholder: Boolean(metadata.placeholder),
-    message: metadata.message || "",
-    problems,
-    files: {
-      language: selectedLanguage,
-      contestDir: path.relative(workspaceDir, contestPath),
-      files: problems.map((problem) => ({
-        problem: problem.index,
-        path: path.relative(workspaceDir, path.join(fileRoot, problem.filename))
-      }))
-    }
-  };
-}
-
-async function resolveContestPythonDir(contestPath) {
-  const current = path.join(contestPath, contestPythonDirName);
-  const hasCurrent = await stat(current).then((value) => value.isDirectory()).catch(() => false);
-  if (hasCurrent) return current;
-  for (const legacyName of legacyContestPythonDirNames) {
-    const legacy = path.join(contestPath, legacyName);
-    const hasLegacy = await stat(legacy).then((value) => value.isDirectory()).catch(() => false);
-    if (hasLegacy) return legacy;
-  }
-  return current;
-}
-
-async function listSavedContests() {
-  const contestRoot = path.join(workspaceDir, "contests");
-  await mkdir(contestRoot, { recursive: true });
-  const entries = await readdir(contestRoot, { withFileTypes: true }).catch(() => []);
-  const contests = await Promise.all(entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map(async (entry) => {
-      const contestPath = path.join(contestRoot, entry.name);
-      const metadata = await readContestMetadata(contestPath);
-      return {
-        contestId: metadata.contestId || entry.name.match(/^(\d+)/)?.[1] || "",
-        name: metadata.name || entry.name.replace(/^\d+-?/, ""),
-        phase: metadata.phase || "",
-        contestDir: path.relative(workspaceDir, contestPath),
-        problemCount: metadata.problems?.length || 0,
-        placeholder: Boolean(metadata.placeholder),
-        message: metadata.message || "",
-        problems: (metadata.problems || []).map((problem) => ({
-          contestId: problem.contestId,
-          index: problem.index,
-          name: problem.name
-        })),
-        savedAt: metadata.savedAt || "",
-        lastModifiedAt: await latestCodeFileMtime(contestPath)
-      };
-    }));
-
-  return contests.sort((a, b) => {
-    const byId = Number(b.contestId || 0) - Number(a.contestId || 0);
-    return byId || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
-  });
-}
-
-// Latest edit time of any code file (.cpp/.py) in a contest dir and its python subdirs,
-// ignoring contest.json so a re-fetch doesn't count as "edited a file".
-async function latestCodeFileMtime(contestPath) {
-  const dirs = [contestPath, path.join(contestPath, contestPythonDirName),
-    ...legacyContestPythonDirNames.map((name) => path.join(contestPath, name))];
-  let latest = 0;
-  for (const dir of dirs) {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!entry.name.endsWith(".cpp") && !entry.name.endsWith(".py")) continue;
-      const info = await stat(path.join(dir, entry.name)).catch(() => null);
-      if (info && info.mtimeMs > latest) latest = info.mtimeMs;
-    }
-  }
-  return latest ? new Date(latest).toISOString() : "";
-}
-
-async function readContestMetadata(contestPath) {
-  const saved = await readContestMetadataFile(contestPath);
-  if (saved?.problems?.length) return saved;
-
-  const folderName = path.basename(contestPath);
-  const contestId = folderName.match(/^(\d+)/)?.[1] || "";
-  const name = folderName.replace(/^\d+-?/, "") || `Codeforces ${contestId}`;
-  const entries = await readdir(contestPath, { withFileTypes: true }).catch(() => []);
-  const problems = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".cpp"))
-    .map((entry) => entry.name.replace(/\.cpp$/, ""))
-    .sort(compareCppFilenames)
-    .map((index) => ({
-      contestId,
-      index,
-      name: index,
-      samples: []
-    }));
-
-  return { contestId, name, phase: "", problems };
-}
-
-async function readContestMetadataFile(contestPath) {
-  const currentPath = path.join(contestPath, contestDataDirName, "contest.json");
-  const legacyPath = path.join(contestPath, "contest.json");
-  return readFile(currentPath, "utf8")
-    .then((value) => JSON.parse(value))
-    .catch(async () => {
-      for (const legacyName of legacyContestDataDirNames) {
-        const legacyDataPath = path.join(contestPath, legacyName, "contest.json");
-        const legacyData = await readFile(legacyDataPath, "utf8")
-          .then((value) => JSON.parse(value))
-          .catch(() => null);
-        if (legacyData) return legacyData;
-      }
-      return readFile(legacyPath, "utf8")
-        .then((value) => JSON.parse(value))
-        .catch(() => null);
-    });
-}
-
-async function resolveSavedContestDir({ contestDir, contestId }) {
-  const contestRoot = path.join(workspaceDir, "contests");
-  const fromDir = String(contestDir || "").trim();
-  if (fromDir) {
-    const normalized = path.normalize(fromDir).replace(/^(\.\.[/\\])+/, "");
-    const absolute = path.resolve(workspaceDir, normalized);
-    if (!absolute.startsWith(contestRoot + path.sep)) {
-      throw new Error("Invalid contest folder.");
-    }
-    const exists = await stat(absolute).then((s) => s.isDirectory()).catch(() => false);
-    if (exists) return absolute;
-  }
-
-  const id = String(contestId || "").trim();
-  if (!/^\d+$/.test(id)) {
-    throw new Error("Saved contest folder was not found.");
-  }
-  const entries = await readdir(contestRoot, { withFileTypes: true }).catch(() => []);
-  const match = entries.find((entry) => entry.isDirectory() && entry.name.startsWith(`${id}-`));
-  if (!match) {
-    throw new Error("Saved contest folder was not found.");
-  }
-  return path.join(contestRoot, match.name);
-}
-
-function safeFolderName(value) {
-  return String(value)
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120) || "contest";
-}
-
-function safeProblemIndex(index) {
-  return String(index).replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
 async function fetchProblemSamples(contestId, index) {
