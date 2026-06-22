@@ -3293,8 +3293,26 @@ textarea,
 
 .auth-area {
   margin-bottom: 10px;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+}
+
+.auth-signin-hint {
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+#gsiButton {
+  display: flex;
+  justify-content: center;
+}
+
+/* Round off the GIS iframe to match the pill shape + soft shadow. */
+#gsiButton iframe {
+  border-radius: 999px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 .auth-user {

@@ -970,9 +970,12 @@ function renderAuth() {
 
   if (!authState.loginEnabled || !authState.clientId) return; // accounts unavailable
 
+  const hint = document.createElement("div");
+  hint.className = "auth-signin-hint";
+  hint.textContent = "Sign in to save your files & contests";
   const btn = document.createElement("div");
   btn.id = "gsiButton";
-  area.append(btn);
+  area.append(hint, btn);
   renderGoogleButton(btn);
 }
 
@@ -985,7 +988,15 @@ function renderGoogleButton(target, attempt = 0) {
     client_id: authState.clientId,
     callback: onGoogleCredential
   });
-  window.google.accounts.id.renderButton(target, { type: "standard", theme: "outline", size: "medium", text: "signin_with" });
+  window.google.accounts.id.renderButton(target, {
+    type: "standard",
+    theme: appearanceMode === "dark" ? "filled_black" : "outline",
+    size: "large",
+    shape: "pill",
+    text: "continue_with",
+    logo_alignment: "left",
+    width: 240
+  });
 }
 
 async function onGoogleCredential(response) {
@@ -1699,6 +1710,9 @@ function applyAppearance() {
   els.themeMenuItems?.forEach((item) => {
     item.classList.toggle("active", item.dataset.themeValue === appearanceTheme);
   });
+  // Re-render the Google button so its theme follows light/dark (only matters
+  // when signed out and the GIS script is ready).
+  if (!isAuthed() && window.google?.accounts?.id) renderAuth();
   applyUiZoom();
   requestAnimationFrame(() => codeEditor?.refresh());
 }
