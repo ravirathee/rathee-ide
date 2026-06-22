@@ -778,6 +778,89 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+/* User-created folders section (below Saved Contests), with a draggable divider
+   between the two so their heights can be split. */
+.folders-section {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 64px;
+  height: var(--folders-height, 220px);
+  border-top: 1px solid var(--line);
+}
+
+.folder-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.folder-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0;
+}
+
+.folder-add-button:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+/* Folder header row: name toggle + import/rename/delete icons. Always shown
+   (the header is a distinct row, so hover-only would be hard to discover). */
+.folder-header {
+  position: relative;
+}
+
+.folder-header > .temp-file-actions {
+  display: flex;
+  opacity: 0.7;
+}
+
+.folder-header:hover > .temp-file-actions {
+  opacity: 1;
+}
+
+.folder-header .temp-file-rename-input {
+  margin: 4px 8px;
+}
+
+/* Inline import URL field that replaces the folder header on import. */
+.folder-header .folder-import-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.folder-header .folder-import-input + .temp-file-action {
+  flex: 0 0 auto;
+  margin-right: 6px;
+}
+
+.drawer-section-resize {
+  flex: 0 0 auto;
+  height: 7px;
+  cursor: ns-resize;
+  background:
+    linear-gradient(var(--line), var(--line)) center / 60% 1px no-repeat;
+}
+
+.drawer-section-resize:hover {
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.8), rgba(var(--accent-rgb), 0.8)) center / 70% 2px no-repeat;
+}
+
 .drawer-label {
   flex: 0 0 auto;
   padding: 10px 12px 5px;

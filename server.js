@@ -10,6 +10,7 @@ import {
   initStore, dbReady, upsertUser, getUserById,
   listFiles, saveFile, deleteFile,
   listContests, addContest, removeContest,
+  listFolders, addFolder, removeFolder,
   getSettings, saveSettings,
   getTemplates, saveTemplate
 } from "./store.js";
@@ -237,8 +238,8 @@ const server = http.createServer(async (req, res) => {
       const uid = user.id;
 
       if (req.method === "GET" && url.pathname === "/api/me/workspace") {
-        const [files, contests, settings, templates] = await Promise.all([
-          listFiles(uid), listContests(uid), getSettings(uid), getTemplates(uid)
+        const [files, contests, folders, settings, templates] = await Promise.all([
+          listFiles(uid), listContests(uid), listFolders(uid), getSettings(uid), getTemplates(uid)
         ]);
         return sendJson(res, 200, {
           files: files.map((f) => ({
@@ -249,6 +250,7 @@ const server = http.createServer(async (req, res) => {
             contestId: c.contest_id, name: c.name, language: c.language,
             problems: c.problems || [], savedAt: c.added_at
           })),
+          folders: folders.map((f) => ({ folderId: f.folder_id, name: f.name, createdAt: f.created_at })),
           settings,
           templates
         });
@@ -285,6 +287,20 @@ const server = http.createServer(async (req, res) => {
         const b = await readJsonBody(req);
         if (!b || !b.contestId) return sendJson(res, 400, { error: "contestId required" });
         await addContest(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/folder") {
+        const b = await readJsonBody(req);
+        if (!b || !b.folderId) return sendJson(res, 400, { error: "folderId required" });
+        await addFolder(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "DELETE" && url.pathname === "/api/me/folder") {
+        const b = await readJsonBody(req);
+        if (!b || !b.folderId) return sendJson(res, 400, { error: "folderId required" });
+        await removeFolder(uid, String(b.folderId));
         return sendJson(res, 200, { ok: true });
       }
 
@@ -425,6 +441,18 @@ const server = http.createServer(async (req, res) => {
         if (problem.code == null || problem.code === "") problem.code = starter;
       }
       result.files = { language: selectedLanguage, contestDir: "" };
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/codeforces/problem") {
+      const body = await readJsonBody(req);
+      const result = await fetchCodeforcesImport(body.url);
+      const templates = await readTemplateBundle();
+      const selectedLanguage = body.language === "python" ? "python" : "cpp";
+      const starter = selectedLanguage === "python" ? (templates.python || "") : (templates.template || "");
+      for (const problem of result.problems || []) {
+        if (problem.code == null || problem.code === "") problem.code = starter;
+      }
       return sendJson(res, 200, result);
     }
 
@@ -602,6 +630,57 @@ function compareCppFilenames(a, b) {
   const aBase = a.replace(/\.cpp$/, "");
   const bBase = b.replace(/\.cpp$/, "");
   return aBase.localeCompare(bBase, undefined, { numeric: true, sensitivity: "base" });
+}
+
+// Pull the problem index (A, B, F1, ...) out of a Codeforces problem URL.
+function extractProblemIndex(raw) {
+  try {
+    const u = new URL(String(raw || ""));
+    if (!/(^|\.)codeforces\.com$/i.test(u.hostname)) return "";
+    const parts = u.pathname.split("/").filter(Boolean);
+    const pi = parts.lastIndexOf("problem");
+    if (pi !== -1) {
+      const a = parts[pi + 1] || ""; // /contest/<id>/problem/<index>
+      const b = parts[pi + 2] || ""; // /problemset/problem/<id>/<index>
+      if (/^\d+$/.test(a) && /^[A-Za-z]\d*$/.test(b)) return b.toUpperCase();
+      if (/^[A-Za-z]\d*$/.test(a)) return a.toUpperCase();
+    }
+    return "";
+  } catch {
+    const m = String(raw || "").match(/problem\/(?:\d+\/)?([A-Za-z]\d*)/i);
+    return m ? m[1].toUpperCase() : "";
+  }
+}
+
+// Import either a single problem (URL has a problem index) or a whole contest
+// (URL is a contest). Always returns { problems: [...] } with samples.
+async function fetchCodeforcesImport(rawUrl) {
+  const contestId = extractContestId(String(rawUrl || ""));
+  const index = extractProblemIndex(String(rawUrl || ""));
+  if (!contestId) {
+    throw new Error("Paste a Codeforces problem or contest URL, e.g. https://codeforces.com/contest/1700/problem/A");
+  }
+  if (!index) {
+    const contest = await fetchCodeforcesProblems(rawUrl);
+    return {
+      problems: (contest.problems || []).map((p) => ({
+        contestId: p.contestId || contestId, index: p.index, name: p.name, samples: p.samples || []
+      }))
+    };
+  }
+  // Single problem: best-effort name from standings, samples from the page.
+  let name = `Problem ${index}`;
+  try {
+    const apiUrl = new URL("https://codeforces.com/api/contest.standings");
+    apiUrl.searchParams.set("contestId", contestId);
+    const { ok, data } = await httpsGetJson(apiUrl, { headers: { "User-Agent": "Forge-IDE/1.0" } });
+    if (ok && data?.status === "OK") {
+      const p = (data.result.problems || []).find((pr) => String(pr.index).toUpperCase() === index);
+      if (p?.name) name = p.name;
+    }
+  } catch { /* keep fallback name */ }
+  const samples = await fetchProblemSamples(contestId, index).catch(() => []);
+  return { problems: [{ contestId: Number(contestId), index, name, samples }] };
 }
 
 async function fetchCodeforcesProblems(contestUrl) {

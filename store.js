@@ -34,8 +34,8 @@ const SCHEMA = [
      id BIGINT AUTO_INCREMENT PRIMARY KEY,
      user_id BIGINT NOT NULL,
      language ENUM('cpp','python') NOT NULL,
-     scope ENUM('scratch','contest') NOT NULL DEFAULT 'scratch',
-     contest_id VARCHAR(32) NOT NULL DEFAULT '',
+     scope ENUM('scratch','contest','folder') NOT NULL DEFAULT 'scratch',
+     contest_id VARCHAR(64) NOT NULL DEFAULT '',
      filename VARCHAR(255) NOT NULL,
      content LONGTEXT,
      input_text LONGTEXT,
@@ -43,6 +43,14 @@ const SCHEMA = [
      UNIQUE KEY uniq_file (user_id, language, scope, contest_id, filename),
      KEY idx_user (user_id),
      CONSTRAINT fk_files_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS user_folders (
+     user_id BIGINT NOT NULL,
+     folder_id VARCHAR(64) NOT NULL,
+     name VARCHAR(255),
+     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     PRIMARY KEY (user_id, folder_id),
+     CONSTRAINT fk_uf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
    ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS user_contests (
      user_id BIGINT NOT NULL,
@@ -111,6 +119,10 @@ export async function initStore() {
 // won't alter an existing table, so guard each ADD COLUMN on information_schema.
 async function applyMigrations() {
   await ensureColumn("user_contests", "problems", "JSON");
+  // Widen the files.scope enum to allow user-created folders, and the container
+  // id column to fit folder ids. Both are safe to run repeatedly.
+  await pool.query(`ALTER TABLE files MODIFY COLUMN scope ENUM('scratch','contest','folder') NOT NULL DEFAULT 'scratch'`).catch(() => {});
+  await pool.query(`ALTER TABLE files MODIFY COLUMN contest_id VARCHAR(64) NOT NULL DEFAULT ''`).catch(() => {});
 }
 
 async function ensureColumn(table, column, definition) {
@@ -196,6 +208,29 @@ export async function addContest(userId, { contestId, name = null, language = "c
 export async function removeContest(userId, contestId) {
   await pool.query(`DELETE FROM files WHERE user_id = ? AND scope = 'contest' AND contest_id = ?`, [userId, String(contestId)]);
   await pool.query(`DELETE FROM user_contests WHERE user_id = ? AND contest_id = ?`, [userId, String(contestId)]);
+}
+
+// ---- Folders (per user; user-created containers of code files) ----
+export async function listFolders(userId) {
+  const [rows] = await pool.query(
+    `SELECT folder_id, name, created_at FROM user_folders WHERE user_id = ? ORDER BY created_at ASC`,
+    [userId]
+  );
+  return rows;
+}
+
+export async function addFolder(userId, { folderId, name = null }) {
+  await pool.query(
+    `INSERT INTO user_folders (user_id, folder_id, name)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+    [userId, String(folderId), name]
+  );
+}
+
+export async function removeFolder(userId, folderId) {
+  await pool.query(`DELETE FROM files WHERE user_id = ? AND scope = 'folder' AND contest_id = ?`, [userId, String(folderId)]);
+  await pool.query(`DELETE FROM user_folders WHERE user_id = ? AND folder_id = ?`, [userId, String(folderId)]);
 }
 
 // ---- Settings (per user, JSON blob) ----

@@ -8,6 +8,10 @@ const els = {
   tempFileList: document.querySelector("#tempFileList"),
   savedContestSection: document.querySelector("#savedContestSection"),
   savedContestList: document.querySelector("#savedContestList"),
+  foldersSection: document.querySelector("#foldersSection"),
+  folderList: document.querySelector("#folderList"),
+  addFolderBtn: document.querySelector("#addFolderBtn"),
+  drawerSectionResize: document.querySelector("#drawerSectionResize"),
   contestSortDropdown: document.querySelector(".contest-sort-dropdown"),
   contestSortBtn: document.querySelector("#contestSortBtn"),
   contestSortMenu: document.querySelector("#contestSortMenu"),
@@ -136,6 +140,9 @@ let activePyFile = "A.py";
 let codeFileScope = "workspace";
 let activeContestDir = "";
 let activeContestId = ""; // Codeforces id of the open contest; DB key for scope='contest' files
+let activeFolderId = ""; // id of the open user folder; DB key for scope='folder' files
+let savedFolders = []; // [{ folderId, name, files: { cpp: [], python: [] } }]
+let expandedFolderKeys = new Set();
 // Files currently open as tabs in the editor (a subset of the file lists). The
 // tab "×" closes a tab (removes it from here); the file itself only goes away
 // when deleted from the left drawer. Kept per-language.
@@ -148,6 +155,7 @@ const contextSnapshots = new Map();
 // Inline SVG icons for the drawer file-row actions (inherit color via currentColor).
 const ICON_RENAME = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
 const ICON_DELETE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+const ICON_IMPORT = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 // Names of the temporary workspace files, cached separately so the "Temporary
 // Code Files" list stays populated even while a contest is the active scope.
 let tempCppNames = [];
@@ -563,6 +571,8 @@ function boot() {
       renderTempFiles();
     }
   });
+  if (els.addFolderBtn) els.addFolderBtn.addEventListener("click", createFolder);
+  initSectionResize();
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
   els.openPythonTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("python-template"));
@@ -1013,6 +1023,10 @@ function resetToAnonymousWorkspace() {
   openCppTabs = []; openPyTabs = [];
   savedContests = [];
   expandedContestKeys.clear();
+  savedFolders = [];
+  activeFolderId = "";
+  expandedFolderKeys.clear();
+  contextSnapshots.clear();
   recentContest = null;
   localStorage.removeItem("rathee.recentContest");
   editorView = "code";
@@ -1021,6 +1035,7 @@ function resetToAnonymousWorkspace() {
   renderFileTabs();
   renderTempFiles();
   renderSavedContests();
+  renderFolders();
   setEditorCode("");
   if (els.input) els.input.value = "";
   if (els.output) els.output.value = "";
@@ -1086,9 +1101,10 @@ async function loadWorkspaceCppFiles() {
       els.input.value = cppInputs[activeCppFile] || "";
       updateEditorEmptyState();
     }
-    // Scope is now "workspace" — re-render the contest drawer so its rows reflect
-    // the closed (non-open) state with correct open handlers, not stale ones.
+    // Scope is now "workspace" — re-render the contest + folder drawers so their
+    // rows reflect the closed (non-open) state with correct open handlers.
     renderSavedContests();
+    renderFolders();
   } catch (error) {
     els.meta.textContent = error.message || "Could not load workspace C++ files";
   }
@@ -1119,6 +1135,7 @@ async function loadWorkspacePythonFiles() {
       updateEditorEmptyState();
     }
     renderSavedContests(); // reflect the now-workspace scope in the contest drawer
+    renderFolders();
   } catch (error) {
     els.meta.textContent = error.message || "Could not load workspace Python files";
   }
@@ -1144,6 +1161,16 @@ async function saveContestPythonFile(filename, code) {
   await putMyFile("python", "contest", filename, code, pyInputs[filename] || "", activeContestId);
 }
 
+async function saveFolderCppFile(filename, code) {
+  if (!isAuthed() || !activeFolderId) return; // anonymous: nothing is persisted
+  await putMyFile("cpp", "folder", filename, code, cppInputs[filename] || "", activeFolderId);
+}
+
+async function saveFolderPythonFile(filename, code) {
+  if (!isAuthed() || !activeFolderId) return; // anonymous: nothing is persisted
+  await putMyFile("python", "folder", filename, code, pyInputs[filename] || "", activeFolderId);
+}
+
 function scheduleWorkspaceCodeSave() {
   if (editorView !== "code") return;
   const isPython = els.language.value === "python";
@@ -1153,8 +1180,8 @@ function scheduleWorkspaceCodeSave() {
   const code = isPython ? pyFiles[filename] : cppFiles[filename];
   codeSaveTimer = setTimeout(() => {
     const save = isPython
-      ? codeFileScope === "contest" ? saveContestPythonFile : saveWorkspacePythonFile
-      : codeFileScope === "contest" ? saveContestCppFile : saveWorkspaceCppFile;
+      ? codeFileScope === "contest" ? saveContestPythonFile : codeFileScope === "folder" ? saveFolderPythonFile : saveWorkspacePythonFile
+      : codeFileScope === "contest" ? saveContestCppFile : codeFileScope === "folder" ? saveFolderCppFile : saveWorkspaceCppFile;
     save(filename, code).catch(() => {
       els.meta.textContent = `Could not save ${filename}`;
     });
@@ -2114,6 +2141,7 @@ function switchLanguage() {
   els.input.value = activeFile ? inputs[activeFile] || "" : "";
   renderFileTabs();
   renderSavedContests(); // open-contest file rows are language-specific
+  renderFolders();
   updateEditorEmptyState();
   updateEditorActionButton();
   setStatus("Idle", "idle");
@@ -2149,6 +2177,7 @@ async function loadSavedContestList() {
   if (!isAuthed()) {
     savedContests = savedContests.filter((c) => c.inMemory);
     renderSavedContests();
+    renderFolders(); // anonymous folders are kept in memory for the session
     return;
   }
   try {
@@ -2183,8 +2212,23 @@ async function loadSavedContestList() {
       tempCppNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "cpp").map((f) => f.filename);
       tempPyNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "python").map((f) => f.filename);
     }
+    // Folders come from the same account fetch: group their files per language.
+    const filesByFolder = {};
+    for (const f of data.files || []) {
+      if (f.scope !== "folder") continue;
+      const fid = String(f.contestId);
+      const bucket = filesByFolder[fid] || (filesByFolder[fid] = { cpp: [], python: [] });
+      if (f.language === "python") bucket.python.push(f.filename);
+      else bucket.cpp.push(f.filename);
+    }
+    savedFolders = (data.folders || []).map((f) => ({
+      folderId: String(f.folderId),
+      name: f.name || "Folder",
+      files: filesByFolder[String(f.folderId)] || { cpp: [], python: [] }
+    }));
     renderSavedContests();
     renderTempFiles();
+    renderFolders();
   } catch (error) {
     els.meta.textContent = error.message || "Could not refresh saved contests";
   }
@@ -2638,6 +2682,7 @@ function isActiveFileContext(ctx) {
   if (ctx.language !== els.language.value) return false;
   if (ctx.scope === "workspace") return codeFileScope === "workspace";
   if (ctx.scope === "contest") return codeFileScope === "contest" && String(activeContestId) === String(ctx.contestId);
+  if (ctx.scope === "folder") return codeFileScope === "folder" && String(activeFolderId) === String(ctx.contestId);
   return false;
 }
 
@@ -2646,10 +2691,419 @@ function isActiveFileContext(ctx) {
 function refreshDrawerAndTabs() {
   renderFileTabs(); // also re-renders the Temporary Code Files list
   renderSavedContests();
+  renderFolders();
+}
+
+// ===================== User folders =====================
+
+// Draggable divider between Saved Contests and Folders: drag adjusts the Folders
+// section height; persisted in localStorage.
+function initSectionResize() {
+  const handle = els.drawerSectionResize;
+  const section = els.foldersSection;
+  if (!handle || !section) return;
+  const saved = Number(localStorage.getItem("rathee.foldersHeight"));
+  if (saved && saved > 64) section.style.height = `${saved}px`;
+  let startY = 0;
+  let startH = 0;
+  const onMove = (e) => {
+    const dy = startY - e.clientY; // drag up → taller folders
+    const h = Math.max(64, Math.min(window.innerHeight - 160, startH + dy));
+    section.style.height = `${h}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    document.body.style.userSelect = "";
+    localStorage.setItem("rathee.foldersHeight", String(parseInt(section.style.height, 10) || 220));
+  };
+  handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    startY = e.clientY;
+    startH = section.getBoundingClientRect().height;
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+}
+
+function generateFolderId() {
+  return `fld-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+function nextFolderName() {
+  const used = new Set(savedFolders.map((f) => f.name));
+  let n = savedFolders.length + 1;
+  while (used.has(`Folder ${n}`)) n += 1;
+  return `Folder ${n}`;
+}
+
+// Build the live file arrays for both languages from a stored map
+// { cpp: {filename:{content,input}}, python: {...} } and make it the active set.
+function setArraysFromStored(stored) {
+  const build = (lang) => {
+    const saved = (stored && stored[lang]) || {};
+    const names = Object.keys(saved).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    return {
+      names,
+      files: Object.fromEntries(names.map((n) => [n, saved[n].content || ""])),
+      inputs: Object.fromEntries(names.map((n) => [n, saved[n].input || ""])),
+      labels: Object.fromEntries(names.map((n) => [n, n])),
+      problems: Object.fromEntries(names.map((n) => [n, null]))
+    };
+  };
+  const c = build("cpp");
+  const p = build("python");
+  cppFileNames = c.names; cppFiles = c.files; cppInputs = c.inputs; cppTabLabels = c.labels; cppProblems = c.problems; openCppTabs = c.names.slice();
+  pyFileNames = p.names; pyFiles = p.files; pyInputs = p.inputs; pyTabLabels = p.labels; pyProblems = p.problems; openPyTabs = p.names.slice();
+  activeCppFile = cppFileNames[0] || "";
+  activePyFile = pyFileNames[0] || "";
+}
+
+async function fetchFolderFiles(folderId) {
+  const stored = { cpp: {}, python: {} };
+  if (!isAuthed()) return stored;
+  try {
+    const res = await fetch("/api/me/workspace", { cache: "no-store" });
+    const data = await res.json();
+    for (const f of data.files || []) {
+      if (f.scope === "folder" && String(f.contestId) === String(folderId)) {
+        stored[f.language][f.filename] = { content: f.content || "", input: f.input || "" };
+      }
+    }
+  } catch { /* empty */ }
+  return stored;
+}
+
+// Keep the open folder's drawer file lists in sync with the live arrays.
+function syncActiveFolderCache() {
+  const entry = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
+  if (entry) entry.files = { cpp: cppFileNames.slice(), python: pyFileNames.slice() };
+}
+
+async function createFolder() {
+  const folderId = generateFolderId();
+  const name = nextFolderName();
+  savedFolders.push({ folderId, name, files: { cpp: [], python: [] } });
+  expandedFolderKeys.add(folderId);
+  if (isAuthed()) {
+    await fetch("/api/me/folder", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId, name })
+    }).catch(() => {});
+  }
+  renderFolders();
+  setStatus("Folder created", "success");
+  els.meta.textContent = `${name} added`;
+}
+
+// Open a folder into the editor (switching scope), preserving the context we
+// leave. Restores its in-memory snapshot if present, else loads from the account.
+async function openFolder(folder, targetFile = "") {
+  const fid = String(folder.folderId || "");
+  if (!fid) return;
+  if (codeFileScope === "folder" && String(activeFolderId) === fid) {
+    if (targetFile && currentFileNames().includes(targetFile) && currentActiveFile() !== targetFile) switchCodeFile(targetFile);
+    return;
+  }
+  stashCurrentContext();
+  codeFileScope = "folder";
+  activeFolderId = fid;
+  activeContestId = "";
+  activeContestDir = "";
+  if (!restoreContext(`folder:${fid}`)) {
+    setArraysFromStored(await fetchFolderFiles(fid));
+  }
+  const names = currentFileNames();
+  const target = targetFile && names.includes(targetFile) ? targetFile : (currentActiveFile() && names.includes(currentActiveFile()) ? currentActiveFile() : names[0] || "");
+  if (els.language.value === "python") activePyFile = target || "";
+  else activeCppFile = target || "";
+  renderCurrentContext();
+}
+
+function createFileInFolder(folder) {
+  openFolder(folder).then(() => {
+    addNextCodeFile();
+    renderFolders();
+  });
+}
+
+async function deleteFolder(folder) {
+  const fid = String(folder.folderId || "");
+  const wasOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
+  if (isAuthed() && fid) {
+    await fetch("/api/me/folder", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId: fid })
+    }).catch(() => {});
+  }
+  contextSnapshots.delete(`folder:${fid}`);
+  savedFolders = savedFolders.filter((f) => String(f.folderId) !== fid);
+  expandedFolderKeys.delete(fid);
+  if (wasOpen) {
+    codeFileScope = "workspace";
+    activeFolderId = "";
+    if (isAuthed()) {
+      await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
+    } else if (!restoreContext("workspace")) {
+      cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; openCppTabs = [];
+      pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; openPyTabs = [];
+      renderCurrentContext();
+    } else {
+      renderCurrentContext();
+    }
+  }
+  renderFolders();
+  setStatus("Folder deleted", "idle");
+  els.meta.textContent = `${folder.name} deleted`;
+}
+
+// Inline-rename a folder name in the header (Enter / blur commits, Esc cancels).
+function beginRenameFolderInline(row, folder) {
+  row.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "temp-file-rename-input";
+  input.value = folder.name || "";
+  input.spellcheck = false;
+  input.autocomplete = "off";
+  let settled = false;
+  const finish = (commit) => {
+    if (settled) return;
+    settled = true;
+    const next = input.value.trim();
+    if (commit && next && next !== folder.name) commitFolderRename(folder, next);
+    else renderFolders();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); finish(true); }
+    else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  row.append(input);
+  input.focus();
+  input.select();
+}
+
+async function commitFolderRename(folder, next) {
+  folder.name = next;
+  if (isAuthed()) {
+    await fetch("/api/me/folder", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId: folder.folderId, name: next })
+    }).catch(() => {});
+  }
+  renderFolders();
+}
+
+function toggleFolderExpanded(folder) {
+  const key = String(folder.folderId);
+  if (expandedFolderKeys.has(key)) expandedFolderKeys.delete(key);
+  else expandedFolderKeys.add(key);
+  renderFolders();
+}
+
+// Click the folder import icon: the header turns into a URL field (left) with the
+// import icon (right). Enter or the icon imports; Esc / clicking away cancels.
+function beginFolderImportInline(header, folder) {
+  header.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "url";
+  input.className = "temp-file-rename-input folder-import-input";
+  input.placeholder = "Paste a problem (or contest) URL…";
+  input.spellcheck = false;
+  input.autocomplete = "off";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "temp-file-action";
+  go.title = "Import";
+  go.innerHTML = ICON_IMPORT;
+  let settled = false;
+  const submit = () => { if (settled) return; settled = true; importIntoFolder(folder, input.value); };
+  const cancel = () => { if (settled) return; settled = true; renderFolders(); };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); submit(); }
+    else if (event.key === "Escape") { event.preventDefault(); cancel(); }
+  });
+  go.addEventListener("mousedown", (event) => { event.preventDefault(); submit(); });
+  input.addEventListener("blur", () => setTimeout(cancel, 150)); // let the import icon's click land first
+  header.append(input, go);
+  input.focus();
+}
+
+// Add a fully-specified file to the currently-active editor context (used by the
+// folder problem import). Persists to the right backend by scope.
+function addFileToActiveContext(filename, code, input, label) {
+  const isPython = els.language.value === "python";
+  const fileNames = isPython ? pyFileNames : cppFileNames;
+  const files = isPython ? pyFiles : cppFiles;
+  const inputs = isPython ? pyInputs : cppInputs;
+  const labels = isPython ? pyTabLabels : cppTabLabels;
+  const problems = isPython ? pyProblems : cppProblems;
+  if (!fileNames.includes(filename)) fileNames.push(filename);
+  files[filename] = code;
+  inputs[filename] = input || "";
+  labels[filename] = label || filename;
+  problems[filename] = null;
+  ensureTabOpen(filename);
+  if (isPython) activePyFile = filename;
+  else activeCppFile = filename;
+  editorView = "code";
+  if (codeFileScope === "folder") {
+    (isPython ? saveFolderPythonFile : saveFolderCppFile)(filename, code).catch(() => {});
+    syncActiveFolderCache();
+  } else if (codeFileScope === "contest") {
+    (isPython ? saveContestPythonFile : saveContestCppFile)(filename, code).catch(() => {});
+  } else {
+    (isPython ? saveWorkspacePythonFile : saveWorkspaceCppFile)(filename, code).catch(() => {});
+  }
+}
+
+// Import a single problem (or a whole contest) into a folder as code file(s),
+// each seeded with the language template and the first sample as its input.
+async function importIntoFolder(folder, rawUrl) {
+  const u = String(rawUrl || "").trim();
+  if (!u) { renderFolders(); return; }
+  setStatus("Importing", "idle");
+  els.meta.textContent = "Fetching Codeforces problem...";
+  try {
+    const res = await fetch("/api/codeforces/problem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: u, language: els.language.value })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not import problem.");
+    const list = data.problems || [];
+    if (!list.length) throw new Error("No problem found at that URL.");
+    await openFolder(folder); // make the folder the active scope
+    const isPython = els.language.value === "python";
+    const ext = isPython ? ".py" : ".cpp";
+    const template = isPython ? pythonCode : cppTemplate;
+    let firstName = "";
+    for (const p of list) {
+      const base = `${p.contestId}${p.index}`; // e.g. 1700A
+      const names = isPython ? pyFileNames : cppFileNames;
+      let filename = `${base}${ext}`;
+      let i = 2;
+      while (names.includes(filename)) { filename = `${base}_${i}${ext}`; i += 1; }
+      const code = p.code || template;
+      const input = p.samples?.[0]?.input || "";
+      addFileToActiveContext(filename, code, input, `${p.index} - ${p.name}`);
+      if (!firstName) firstName = filename;
+    }
+    if (firstName) switchCodeFile(firstName);
+    refreshDrawerAndTabs();
+    setStatus("Imported", "success");
+    els.meta.textContent = list.length === 1
+      ? `${list[0].index}. ${list[0].name} added to ${folder.name}`
+      : `${list.length} problems added to ${folder.name}`;
+  } catch (error) {
+    setStatus("Import failed", "error");
+    els.meta.textContent = error.message || "Codeforces import failed";
+    renderFolders();
+  }
+}
+
+function renderFolders() {
+  if (!els.folderList) return;
+  els.folderList.innerHTML = "";
+  for (const folder of savedFolders) {
+    const fid = String(folder.folderId);
+    const expanded = expandedFolderKeys.has(fid);
+    const isOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
+    const group = document.createElement("div");
+    group.className = "saved-contest-group";
+
+    const header = document.createElement("div");
+    header.className = "saved-contest-header folder-header";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "drawer-item saved-contest-btn contest-toggle-btn";
+    button.title = folder.name;
+    button.setAttribute("aria-expanded", String(expanded));
+    const chevron = document.createElement("span");
+    chevron.className = "contest-chevron";
+    chevron.textContent = ">";
+    const label = document.createElement("span");
+    label.className = "contest-title";
+    label.textContent = folder.name;
+    button.append(chevron, label);
+    button.addEventListener("click", () => toggleFolderExpanded(folder));
+
+    const actions = document.createElement("div");
+    actions.className = "temp-file-actions folder-header-actions";
+    const importBtn = document.createElement("button");
+    importBtn.type = "button";
+    importBtn.className = "temp-file-action";
+    importBtn.title = `Import a problem into ${folder.name}`;
+    importBtn.innerHTML = ICON_IMPORT;
+    importBtn.addEventListener("click", (event) => { event.stopPropagation(); beginFolderImportInline(header, folder); });
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "temp-file-action";
+    renameBtn.title = `Rename ${folder.name}`;
+    renameBtn.innerHTML = ICON_RENAME;
+    renameBtn.addEventListener("click", (event) => { event.stopPropagation(); beginRenameFolderInline(header, folder); });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "temp-file-action temp-file-delete";
+    delBtn.title = `Delete ${folder.name}`;
+    delBtn.innerHTML = ICON_DELETE;
+    delBtn.addEventListener("click", (event) => { event.stopPropagation(); deleteFolder(folder); });
+    actions.append(importBtn, renameBtn, delBtn);
+
+    header.append(button, actions);
+    group.append(header);
+
+    if (expanded) {
+      const list = document.createElement("div");
+      list.className = "contest-problem-list";
+      if (isOpen) folder.files = { cpp: cppFileNames.slice(), python: pyFileNames.slice() };
+      const isPython = els.language.value === "python";
+      const names = isOpen
+        ? (isPython ? pyFileNames : cppFileNames)
+        : ((folder.files && folder.files[isPython ? "python" : "cpp"]) || []).slice().sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+      if (!names.length) {
+        const row = document.createElement("div");
+        row.className = "temp-file-empty-row";
+        const empty = document.createElement("span");
+        empty.className = "temp-file-empty";
+        empty.textContent = "No files yet";
+        const create = document.createElement("button");
+        create.type = "button";
+        create.className = "temp-create-file";
+        const fn = isPython ? "A.py" : "A.cpp";
+        create.textContent = `+ ${fn}`;
+        create.title = `Create ${fn}`;
+        create.addEventListener("click", () => createFileInFolder(folder));
+        row.append(empty, create);
+        list.append(row);
+      } else {
+        const labels = isOpen ? (isPython ? pyTabLabels : cppTabLabels) : {};
+        const activeFile = currentActiveFile();
+        const manageable = isOpen || isAuthed();
+        for (const filename of names) {
+          const isActive = isOpen && editorView === "code" && filename === activeFile;
+          const ctx = { language: els.language.value, scope: "folder", contestId: fid, filename };
+          const row = createManagedFileRow(ctx, labels[filename] || filename, isActive, () => openFolder(folder, filename), manageable);
+          list.append(row);
+        }
+      }
+      group.append(list);
+    }
+    els.folderList.append(group);
+  }
 }
 
 function currentContextKey() {
-  return codeFileScope === "contest" && activeContestId ? `contest:${activeContestId}` : "workspace";
+  if (codeFileScope === "contest" && activeContestId) return `contest:${activeContestId}`;
+  if (codeFileScope === "folder" && activeFolderId) return `folder:${activeFolderId}`;
+  return "workspace";
 }
 
 // Save the current editor context (all files for both languages) into the
@@ -2685,6 +3139,7 @@ function renderCurrentContext() {
   updateEditorEmptyState();
   renderFileTabs();
   renderSavedContests();
+  renderFolders();
   updateDrawerActiveItem();
 }
 
@@ -2856,8 +3311,10 @@ function closeTab(filename) {
 // Remove a file's name from the relevant drawer cache (used after a non-active
 // delete/rename so the list reflects it without touching the live editor).
 function removeFromDrawerCache(ctx, replacement = null) {
-  if (ctx.scope === "contest") {
-    const entry = savedContests.find((c) => String(c.contestId) === String(ctx.contestId));
+  if (ctx.scope === "contest" || ctx.scope === "folder") {
+    const collection = ctx.scope === "folder" ? savedFolders : savedContests;
+    const idKey = ctx.scope === "folder" ? "folderId" : "contestId";
+    const entry = collection.find((c) => String(c[idKey]) === String(ctx.contestId));
     const list = entry && entry.files && entry.files[ctx.language];
     if (list) {
       const i = list.indexOf(ctx.filename);
@@ -2925,7 +3382,12 @@ async function deleteActiveFile(filename) {
     await deleteMyFile(isPython ? "python" : "cpp", "contest", filename, activeContestId).catch(() => {
       els.meta.textContent = `Could not delete ${filename}`;
     });
+  } else if (codeFileScope === "folder" && isAuthed() && activeFolderId) {
+    await deleteMyFile(isPython ? "python" : "cpp", "folder", filename, activeFolderId).catch(() => {
+      els.meta.textContent = `Could not delete ${filename}`;
+    });
   }
+  if (codeFileScope === "folder") syncActiveFolderCache();
   if (activeFile === filename) {
     const nextActiveFile = nextFileNames[Math.max(0, index - 1)] || nextFileNames[0] || "";
     if (isPython) activePyFile = nextActiveFile;
@@ -3029,7 +3491,12 @@ async function commitActiveRename(filename, next) {
     const lang = isPython ? "python" : "cpp";
     await putMyFile(lang, "contest", next, content, input, activeContestId).catch(() => {});
     await deleteMyFile(lang, "contest", filename, activeContestId).catch(() => {});
+  } else if (codeFileScope === "folder" && isAuthed() && activeFolderId) {
+    const lang = isPython ? "python" : "cpp";
+    await putMyFile(lang, "folder", next, content, input, activeFolderId).catch(() => {});
+    await deleteMyFile(lang, "folder", filename, activeFolderId).catch(() => {});
   }
+  if (codeFileScope === "folder") syncActiveFolderCache();
   refreshDrawerAndTabs();
   setStatus("Renamed", "success");
   els.meta.textContent = `${filename} → ${next}`;
@@ -3099,6 +3566,13 @@ function addNextCodeFile() {
     save(filename, files[filename]).catch(() => {
       els.meta.textContent = `Could not create ${filename} in ${folderName}`;
     });
+  } else if (codeFileScope === "contest") {
+    const save = isPython ? saveContestPythonFile : saveContestCppFile;
+    save(filename, files[filename]).catch(() => {});
+  } else if (codeFileScope === "folder") {
+    const save = isPython ? saveFolderPythonFile : saveFolderCppFile;
+    save(filename, files[filename]).catch(() => {});
+    syncActiveFolderCache();
   }
   setStatus("Created", "success");
   els.meta.textContent = `${filename} added`;
@@ -3169,6 +3643,7 @@ function switchCodeFile(filename) {
   updateEditorEmptyState();
   updateDrawerActiveItem();
   renderSavedContests(); // keep the open contest's active-file highlight in sync
+  renderFolders();
   // Coming back from a template view, or reopening a closed tab, rebuild the tab
   // strip; otherwise just move the highlight.
   if (leavingTemplateView || !wasOpen) renderFileTabs();
