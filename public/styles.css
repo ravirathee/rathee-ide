@@ -1384,6 +1384,7 @@ body.resizing .resize-handle::after {
 .editor-pane > .CodeMirror,
 #code {
   grid-row: 3;
+  grid-column: 1;
 }
 
 .editor-debug-panel {
@@ -1427,6 +1428,8 @@ body.resizing .resize-handle::after {
 }
 
 .editor-quick-settings {
+  position: relative;
+  z-index: 7; /* sit above the empty-editor overlay so the language picker is usable */
   display: flex;
   flex-wrap: nowrap;
   align-items: flex-start;
@@ -1434,7 +1437,7 @@ body.resizing .resize-handle::after {
   min-width: 0;
   padding: 8px 11px;
   border-bottom: 1px solid var(--line);
-  background: var(--header-tint);
+  background: var(--panel-solid);
 }
 
 .editor-quick-settings[hidden] {
@@ -1569,6 +1572,7 @@ body.resizing .resize-handle::after {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  min-height: 32px; /* keep the top bar the same height with no files vs. with tabs */
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -1612,10 +1616,11 @@ body.resizing .resize-handle::after {
 }
 
 .add-file-tab {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   padding: 0;
-  text-align: center;
   font-weight: 900;
   color: var(--accent);
 }
@@ -1856,8 +1861,10 @@ textarea,
 }
 
 .empty-editor-state {
-  position: absolute;
-  inset: 43px 0 0 0;
+  grid-row: 3; /* overlay only the code area — not the top bar or settings row */
+  grid-column: 1; /* same cell as the editor so it overlaps it (not a new column) */
+  min-width: 0;
+  min-height: 0;
   display: grid;
   place-items: center;
   background: var(--editor-bg);

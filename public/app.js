@@ -172,7 +172,7 @@ let contestSortMode = contestSortModes.includes(localStorage.getItem("rathee.con
   ? localStorage.getItem("rathee.contestSortMode")
   : "hosted";
 let expandedContestKeys = new Set();
-let tempFilesExpanded = false;
+let tempFilesExpanded = true; // Temporary Code Files start expanded on load
 let codeforcesHandle = localStorage.getItem("rathee.codeforcesHandle") || "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
 let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
@@ -717,7 +717,15 @@ async function initAuth(justLoggedIn = false) {
   // Reload the scratch workspace from the right backend now auth is known.
   await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles()]).catch(() => {});
   loadSavedContestList(); // empty when anonymous; the saved list when signed in
+  // On the very first load, if there are no files yet, reveal the editor settings
+  // so the language picker is usable before creating the first file (the "Create
+  // A.cpp/A.py" overlay otherwise sits over it).
+  if (!bootSettingsHandled) {
+    bootSettingsHandled = true;
+    if (editorView === "code" && !currentActiveFile()) setEditorQuickSettings(true);
+  }
 }
+let bootSettingsHandled = false;
 
 // Load the signed-in user's settings + templates from their account and apply
 // them; if their account has none yet (first login), seed it from the current
@@ -2037,9 +2045,13 @@ function setCodeEditorPlacement(side) {
 }
 
 function toggleEditorQuickSettings() {
-  editorQuickSettingsOpen = !editorQuickSettingsOpen;
-  els.editorQuickSettings.hidden = !editorQuickSettingsOpen;
-  els.editorQuickSettingsBtn.setAttribute("aria-expanded", String(editorQuickSettingsOpen));
+  setEditorQuickSettings(!editorQuickSettingsOpen);
+}
+
+function setEditorQuickSettings(open) {
+  editorQuickSettingsOpen = open;
+  els.editorQuickSettings.hidden = !open;
+  els.editorQuickSettingsBtn.setAttribute("aria-expanded", String(open));
   requestAnimationFrame(() => {
     codeEditor?.setSize("100%", "100%");
     codeEditor?.refresh();
@@ -3515,10 +3527,12 @@ function addNextCodeFile() {
   } else if (codeFileScope === "contest") {
     const save = isPython ? saveContestPythonFile : saveContestCppFile;
     save(filename, files[filename]).catch(() => {});
+    renderSavedContests(); // reflect the new file in the open contest's drawer list
   } else if (codeFileScope === "folder") {
     const save = isPython ? saveFolderPythonFile : saveFolderCppFile;
     save(filename, files[filename]).catch(() => {});
     syncActiveFolderCache();
+    renderFolders(); // reflect the new file in the open folder's drawer list immediately
   }
   setStatus("Created", "success");
   els.meta.textContent = `${filename} added`;
@@ -3526,7 +3540,9 @@ function addNextCodeFile() {
 
 function createFirstCppFile() {
   if (currentFileNames().length === 0) {
+    tempFilesExpanded = true; // reveal the Temporary Code Files list with the new file
     addNextCodeFile();
+    setEditorQuickSettings(false); // collapse settings once the editor has a file
   }
 }
 
