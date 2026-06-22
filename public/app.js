@@ -1272,6 +1272,7 @@ function initCodeEditor() {
     mode: "text/x-c++src"
   });
   codeEditor.setSize("100%", "100%");
+  codeEditor.toggleOverwrite(false); // ensure a normal insert caret, never overwrite
   codeEditor.on("keydown", handleEditorKeyDown);
   codeEditor.on("gutterClick", handleEditorGutterClick);
 }
@@ -1288,6 +1289,9 @@ function codeMirrorOptions() {
     lineWrapping: false,
     viewportMargin: Infinity,
     extraKeys: {
+      // Disable overwrite-mode toggling (the block "type-over" cursor); keep a
+      // normal insert caret always.
+      Insert: false,
       Tab(cm) {
         if (moveToNextSnippetStop(cm)) return;
         if (cm.somethingSelected()) {
