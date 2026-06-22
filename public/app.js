@@ -992,10 +992,10 @@ function renderGoogleButton(target, attempt = 0) {
     type: "standard",
     theme: appearanceMode === "dark" ? "filled_black" : "outline",
     size: "large",
-    shape: "pill",
+    shape: "rectangular",
     text: "continue_with",
     logo_alignment: "left",
-    width: 240
+    width: 250
   });
 }
 
