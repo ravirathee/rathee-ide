@@ -653,7 +653,9 @@ function boot() {
     if (event.key === "Enter") importContest();
   });
   els.contestUrl.addEventListener("input", updateContestChip);
-  if (recentContest?.url) els.contestUrl.value = recentContest.url;
+  // Pre-fill with the last opened contest, else a sample URL so users see the
+  // expected format. It's only filled in — never auto-imported.
+  els.contestUrl.value = recentContest?.url || "https://codeforces.com/contest/2236";
   updateContestChip();
   els.codeLeftBtn.addEventListener("click", () => setCodeEditorPlacement("left"));
   els.codeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
