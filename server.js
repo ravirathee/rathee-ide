@@ -504,6 +504,8 @@ async function readTextWithFallback(primaryPath, fallbackPath) {
 
 // Pull the problem index (A, B, F1, ...) out of a Codeforces problem URL.
 function extractProblemIndex(raw) {
+  const ref = parseBareProblemRef(raw);
+  if (ref) return ref.index;
   try {
     const u = new URL(String(raw || ""));
     if (!/(^|\.)codeforces\.com$/i.test(u.hostname)) return "";
@@ -522,13 +524,35 @@ function extractProblemIndex(raw) {
   }
 }
 
+function parseBareProblemRef(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{3,7})\s*[-_/ ]?\s*([A-Za-z]\d*)$/);
+  if (!match) return null;
+  return { contestId: match[1], index: match[2].toUpperCase() };
+}
+
+function splitProblemRefs(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 // Import either a single problem (URL has a problem index) or a whole contest
 // (URL is a contest). Always returns { problems: [...] } with samples.
 async function fetchCodeforcesImport(rawUrl) {
-  const contestId = extractContestId(String(rawUrl || ""));
-  const index = extractProblemIndex(String(rawUrl || ""));
+  const refs = splitProblemRefs(rawUrl);
+  if (refs.length > 1) {
+    const imported = await Promise.all(refs.map((ref) => fetchCodeforcesImport(ref)));
+    return { problems: imported.flatMap((item) => item.problems || []) };
+  }
+  const raw = String(rawUrl || "");
+  const bareRef = parseBareProblemRef(raw);
+  const contestId = bareRef?.contestId || extractContestId(raw);
+  const index = bareRef?.index || extractProblemIndex(raw);
   if (!contestId) {
-    throw new Error("Paste a Codeforces problem or contest URL, e.g. https://codeforces.com/contest/1700/problem/A");
+    throw new Error("Paste a Codeforces problem URL or code, e.g. 1700A or https://codeforces.com/contest/1700/problem/A");
   }
   if (!index) {
     const contest = await fetchCodeforcesProblems(rawUrl);
@@ -849,6 +873,8 @@ function decodeHtml(value) {
 function extractContestId(contestUrl) {
   const raw = String(contestUrl || "").trim();
   if (!raw) return "";
+  const ref = parseBareProblemRef(raw);
+  if (ref) return ref.contestId;
   // bare contest number, e.g. "2231"
   if (/^\d+$/.test(raw)) return raw;
   try {

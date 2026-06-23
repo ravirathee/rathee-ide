@@ -2908,10 +2908,11 @@ function beginFolderImportInline(header, folder) {
   input.focus();
 }
 
-// Add a fully-specified file to the currently-active editor context (used by the
-// folder problem import). Persists to the right backend by scope.
-function addFileToActiveContext(filename, code, input, label) {
-  const isPython = els.language.value === "python";
+// Add a fully-specified file to the active folder context for one language.
+// Folder imports call this twice per problem so C++ and Python stay in sync,
+// while the drawer still shows only the files for the selected language.
+function addFileToActiveFolderContext(language, filename, code, input, label, problem = null) {
+  const isPython = language === "python";
   const fileNames = isPython ? pyFileNames : cppFileNames;
   const files = isPython ? pyFiles : cppFiles;
   const inputs = isPython ? pyInputs : cppInputs;
@@ -2921,19 +2922,31 @@ function addFileToActiveContext(filename, code, input, label) {
   files[filename] = code;
   inputs[filename] = input || "";
   labels[filename] = label || filename;
-  problems[filename] = null;
-  ensureTabOpen(filename);
-  if (isPython) activePyFile = filename;
-  else activeCppFile = filename;
-  editorView = "code";
-  if (codeFileScope === "folder") {
-    (isPython ? saveFolderPythonFile : saveFolderCppFile)(filename, code).catch(() => {});
-    syncActiveFolderCache();
-  } else if (codeFileScope === "contest") {
-    (isPython ? saveContestPythonFile : saveContestCppFile)(filename, code).catch(() => {});
+  problems[filename] = problem;
+  if (language === els.language.value) {
+    ensureTabOpen(filename);
+  } else if (isPython) {
+    activePyFile = filename;
+    if (!openPyTabs.includes(filename)) openPyTabs.push(filename);
   } else {
-    (isPython ? saveWorkspacePythonFile : saveWorkspaceCppFile)(filename, code).catch(() => {});
+    activeCppFile = filename;
+    if (!openCppTabs.includes(filename)) openCppTabs.push(filename);
   }
+  editorView = "code";
+  if (codeFileScope === "folder" && isAuthed() && activeFolderId) {
+    putMyFile(language, "folder", filename, code, input || "", activeFolderId).catch(() => {});
+  }
+  syncActiveFolderCache();
+}
+
+function uniqueFilenameFor(list, base, extension) {
+  let filename = `${base}${extension}`;
+  let i = 2;
+  while (list.includes(filename)) {
+    filename = `${base}_${i}${extension}`;
+    i += 1;
+  }
+  return filename;
 }
 
 // Import a single problem (or a whole contest) into a folder as code file(s),
@@ -2954,22 +2967,21 @@ async function importIntoFolder(folder, rawUrl) {
     const list = data.problems || [];
     if (!list.length) throw new Error("No problem found at that URL.");
     await openFolder(folder); // make the folder the active scope
-    const isPython = els.language.value === "python";
-    const ext = isPython ? ".py" : ".cpp";
-    const template = isPython ? pythonCode : cppTemplate;
     let firstName = "";
     for (const p of list) {
       const base = `${p.contestId}${p.index}`; // e.g. 1700A
-      const names = isPython ? pyFileNames : cppFileNames;
-      let filename = `${base}${ext}`;
-      let i = 2;
-      while (names.includes(filename)) { filename = `${base}_${i}${ext}`; i += 1; }
-      const code = p.code || template;
       const input = p.samples?.[0]?.input || "";
-      addFileToActiveContext(filename, code, input, `${p.index} - ${p.name}`);
-      if (!firstName) firstName = filename;
+      const cppName = uniqueFilenameFor(cppFileNames, base, ".cpp");
+      const pyName = uniqueFilenameFor(pyFileNames, base, ".py");
+      addFileToActiveFolderContext("cpp", cppName, cppTemplate, input, `${cppName} - ${p.name}`, p);
+      addFileToActiveFolderContext("python", pyName, pythonCode, input, `${pyName} - ${p.name}`, p);
+      if (!firstName) firstName = els.language.value === "python" ? pyName : cppName;
     }
-    if (firstName) switchCodeFile(firstName);
+    if (firstName) {
+      if (els.language.value === "python") activePyFile = "";
+      else activeCppFile = "";
+      switchCodeFile(firstName);
+    }
     refreshDrawerAndTabs();
     setStatus("Imported", "success");
     els.meta.textContent = list.length === 1
