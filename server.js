@@ -949,7 +949,7 @@ async function executeCode({ language, code, input = "", mode = "run", breakpoin
     } else {
       const binary = path.join(runDir, "main.out");
       compile = await runProcess("g++", [
-        "-std=c++17",
+        "-std=c++20",
         "-Wall",
         "-Wextra",
         ...(mode === "debug" ? ["-O0", "-g", "-fsanitize=address,undefined"] : ["-O2"]),
@@ -1061,7 +1061,7 @@ async function startCppDebugSession({ code, input = "", breakpoints = [], client
     await writeFile(outputFilePath, "", "utf8");
 
     const compile = await runProcess("g++", [
-      "-std=c++17", "-Wall", "-Wextra", "-O0", "-g", source, "-o", binary
+      "-std=c++20", "-Wall", "-Wextra", "-O0", "-g", source, "-o", binary
     ], { cwd: runDir, timeoutMs: runTimeoutMs });
 
     if (compile.code !== 0 || compile.timedOut) {

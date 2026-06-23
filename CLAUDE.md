@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The host runs **Node v16.17.0** — global `fetch` is **not** available (added in Node 18), nor are other 18+ globals like `structuredClone`. For outbound HTTP in `server.js`, use the `node:https` helpers (`httpsGetText` / `httpsGetJson`), never global `fetch`.
 
-Runtime prerequisites on the host: `python3` and `g++` must be on `PATH`. `g++` is invoked with `-std=c++17 -Wall -Wextra -O2`; debug mode adds `-g -fsanitize=address,undefined`. Each run has an 8-second wall-clock cap (`runTimeoutMs` in `server.js`).
+Runtime prerequisites on the host: `python3` and `g++` must be on `PATH`. `g++` is invoked with `-std=c++20 -Wall -Wextra -O2`; debug mode adds `-g -fsanitize=address,undefined`. Each run has an 8-second wall-clock cap (`runTimeoutMs` in `server.js`).
 
 ## Architecture
 
