@@ -1401,7 +1401,7 @@ function boot() {
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
   els.openPythonTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("python-template"));
   els.openJavaTemplateFileBtn?.addEventListener("click", () => openTemplateSettingsFile("java-template"));
-  els.createFirstFileBtn.addEventListener("click", createFirstCppFile);
+  els.createFirstFileBtn.addEventListener("click", createFirstCodeFile);
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
   els.cfStatusBtn.addEventListener("click", () => refreshCodeforcesStatus(true));
@@ -2525,7 +2525,7 @@ function updateEditorEmptyState() {
   const language = els.language.value;
   const empty = editorView === "code" && !currentActiveFile();
   els.emptyEditorState.hidden = !empty;
-  els.createFirstFileBtn.textContent = `Create ${LANGUAGE_CONFIG[language]?.defaultFile || "A.cpp"}`;
+  els.createFirstFileBtn.textContent = `Create a ${LANGUAGE_CONFIG[language]?.label || "C++"} File`;
   codeEditor?.setOption("readOnly", empty ? "nocursor" : false);
 }
 
@@ -4642,12 +4642,14 @@ function addNextCodeFile() {
   els.meta.textContent = `${filename} added`;
 }
 
-function createFirstCppFile() {
-  if (currentFileNames().length === 0) {
-    tempFilesExpanded = true; // reveal the Temporary Code Files list with the new file
-    addNextCodeFile();
-    setEditorQuickSettings(false); // collapse settings once the editor has a file
-  }
+// Empty-editor-state "Create a <Lang> File" button. Behaves exactly like the
+// "+" tab: adds the next file in the CURRENT scope (workspace/contest/folder).
+// (Previously this no-opped when the folder still had closed-but-existing files,
+// because it bailed unless the file list was completely empty.)
+function createFirstCodeFile() {
+  if (currentFileNames().length === 0) tempFilesExpanded = true; // reveal the Temporary Code Files list with the new file
+  addNextCodeFile();
+  setEditorQuickSettings(false); // collapse settings once the editor has a file
 }
 
 // Create the first temporary (scratch) file from the drawer's empty state,
