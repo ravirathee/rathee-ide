@@ -244,25 +244,6 @@ export async function removeFolder(userId, folderId) {
   await pool.query(`DELETE FROM user_folders WHERE user_id = ? AND folder_id = ?`, [userId, String(folderId)]);
 }
 
-// Delete only one language's files in a folder. The folder row (and its other
-// languages' files) survive unless this was the last language with files, in
-// which case the now-empty folder is removed too.
-export async function removeFolderLanguage(userId, folderId, language) {
-  await pool.query(
-    `DELETE FROM files WHERE user_id = ? AND scope = 'folder' AND contest_id = ? AND language = ?`,
-    [userId, String(folderId), language]
-  );
-  const [rows] = await pool.query(
-    `SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND scope = 'folder' AND contest_id = ?`,
-    [userId, String(folderId)]
-  );
-  const folderRemoved = Number(rows[0]?.n || 0) === 0;
-  if (folderRemoved) {
-    await pool.query(`DELETE FROM user_folders WHERE user_id = ? AND folder_id = ?`, [userId, String(folderId)]);
-  }
-  return { folderRemoved };
-}
-
 // ---- Settings (per user, JSON blob) ----
 export async function getSettings(userId) {
   const [rows] = await pool.query(`SELECT data FROM settings WHERE user_id = ?`, [userId]);

@@ -10,7 +10,7 @@ import {
   initStore, dbReady, upsertUser, getUserById,
   listFiles, saveFile, deleteFile,
   listContests, addContest, removeContest,
-  listFolders, addFolder, removeFolder, removeFolderLanguage,
+  listFolders, addFolder, removeFolder,
   getSettings, saveSettings,
   getTemplates, saveTemplate
 } from "./store.js";
@@ -297,14 +297,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "DELETE" && url.pathname === "/api/me/folder") {
         const b = await readJsonBody(req);
         if (!b || !b.folderId) return sendJson(res, 400, { error: "folderId required" });
-        // With a language, delete only that language's files (folder removed only
-        // if it becomes empty). Without one, delete the whole folder (legacy).
-        if (b.language && ["cpp", "python", "java"].includes(b.language)) {
-          const result = await removeFolderLanguage(uid, String(b.folderId), b.language);
-          return sendJson(res, 200, { ok: true, ...result });
-        }
         await removeFolder(uid, String(b.folderId));
-        return sendJson(res, 200, { ok: true, folderRemoved: true });
+        return sendJson(res, 200, { ok: true });
       }
 
       if (req.method === "DELETE" && url.pathname === "/api/me/contest") {
