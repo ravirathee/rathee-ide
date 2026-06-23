@@ -95,7 +95,9 @@ const els = {
   autoCompletionPairs: document.querySelector("#autoCompletionPairs"),
   autoCompletionPlaceholder: document.querySelector("#autoCompletionPlaceholder"),
   autoCompletionRuleList: document.querySelector("#autoCompletionRuleList"),
-  autoCompletionCreateRuleBtn: document.querySelector("#autoCompletionCreateRuleBtn"),
+  autoCompletionCategoryTabs: document.querySelector("#autoCompletionCategoryTabs"),
+  autoCompletionSaveBtn: document.querySelector("#autoCompletionSaveBtn"),
+  autoCompletionSaveStatus: document.querySelector("#autoCompletionSaveStatus"),
   fontSizeLabel: document.querySelector("#fontSizeLabel"),
   saveTemplateBtn: document.querySelector("#saveTemplateBtn"),
   saveFilesBtn: document.querySelector("#saveFilesBtn"),
@@ -179,12 +181,191 @@ let editorFontFamily = localStorage.getItem("rathee.editorFontFamily")
   || "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace";
 const APPEARANCE_MODES = ["light", "dark"];
 const APPEARANCE_THEMES = ["aurora", "indigo", "sunset", "mono"];
+const DEFAULT_AUTO_COMPLETION_RULES = {
+  for: "for(int i = 0 ; i < ntabtab ; i++){\n\t    tabtab\n\t}tabtab",
+  forr: "for(int i = ntabtab - 1 ; i >= 0 ; i--){\n\t    tabtab\n\t}tabtab",
+  rep: "for(int i = 0 ; i < tabtab ; i++){\n\t    tabtab\n\t}tabtab",
+  while: "while(tabtab){\n\t    tabtab\n\t}tabtab",
+  dowhile: "do{\n\t    tabtab\n\t}while(tabtab);tabtab",
+  foreach: "for(auto &tabtab : tabtab){\n\t    tabtab\n\t}tabtab",
+  cout: "cout << tabtab << \"\\n\";tabtab",
+  cin: "cin >> tabtab >> \"\\n\";tabtab",
+  vecint: "vector<int> tabtab;tabtab",
+  vecll: "vector<long long> tabtab;tabtab",
+  vecchar: "vector<char> tabtab;tabtab",
+  vecstr: "vector<string> tabtab;tabtab",
+  vecbool: "vector<bool> tabtab;tabtab",
+  vecvecint: "vector<vector<int>> tabtab;tabtab",
+  vecvecll: "vector<vector<long long>> tabtab;tabtab",
+  setint: "set<int> tabtab;tabtab",
+  setll: "set<long long> tabtab;tabtab",
+  msetint: "multiset<int> tabtab;tabtab",
+  pairint: "pair<int, int> tabtab;tabtab",
+  pairll: "pair<long long, long long> tabtab;tabtab",
+  vecpair: "vector<pair<int, int>> tabtab;tabtab",
+  vecpairll: "vector<pair<long long, long long>> tabtab;tabtab",
+  mapintint: "map<int, int> tabtab;tabtab",
+  mapstrint: "map<string, int> tabtab;tabtab",
+  umapintint: "unordered_map<int, int> tabtab;tabtab",
+  "umap<int,char>": "unordered_map<int, char> tabtab;tabtab",
+  usetint: "unordered_set<int> tabtab;tabtab",
+  pqint: "priority_queue<int> tabtab;tabtab",
+  minpqint: "priority_queue<int, vector<int>, greater<int>> tabtab;tabtab",
+  queueint: "queue<int> tabtab;tabtab",
+  stackint: "stack<int> tabtab;tabtab",
+  dequeint: "deque<int> tabtab;tabtab",
+  sortv: "sort(tabtab.begin(), tabtab.end());tabtab",
+  rsortv: "sort(tabtab.rbegin(), tabtab.rend());tabtab",
+  revv: "reverse(tabtab.begin(), tabtab.end());tabtab",
+  lb: "lower_bound(tabtab.begin(), tabtab.end(), tabtab)tabtab",
+  ub: "upper_bound(tabtab.begin(), tabtab.end(), tabtab)tabtab",
+  all: "begin(tabtab), end(tabtab)",
+  acc: "accumulate(tabtab.begin(), tabtab.end(), 0LL)tabtab",
+  minel: "*min_element(tabtab.begin(), tabtab.end())tabtab",
+  maxel: "*max_element(tabtab.begin(), tabtab.end())tabtab",
+  adj: "vector<vector<int>> adj(tabtab);tabtab",
+  edgeu: "adj[u].push_back(v);\nadj[v].push_back(u);tabtab",
+  vis: "vector<int> vis(tabtab, 0);tabtab",
+  bfs: "queue<int> q;\nq.push(tabtab);\nvis[tabtab] = 1;\nwhile(!q.empty()){\n\t    int node = q.front();\n\t    q.pop();\n\t    tabtab\n\t}tabtab",
+  dfs: "auto dfs = [&](auto &&self, int node, int parent) -> void {\n\t    tabtab\n\t};\ndfs(dfs, tabtab, -1);tabtab",
+  dsu: "vector<int> parent(tabtab), sz(tabtab, 1);\niota(parent.begin(), parent.end(), 0);\nauto find = [&](auto &&self, int x) -> int {\n\t    return parent[x] == x ? x : parent[x] = self(self, parent[x]);\n};\nauto unite = [&](int a, int b) -> bool {\n\t    a = find(find, a), b = find(find, b);\n\t    if(a == b) return false;\n\t    if(sz[a] < sz[b]) swap(a, b);\n\t    parent[b] = a;\n\t    sz[a] += sz[b];\n\t    return true;\n};tabtab",
+  dp: "vector<int> dp(tabtab, tabtab);tabtab",
+  dpll: "vector<long long> dp(tabtab, tabtab);tabtab",
+  dp2: "vector<vector<int>> dp(tabtab, vector<int>(tabtab, tabtab));tabtab",
+  dp2ll: "vector<vector<long long>> dp(tabtab, vector<long long>(tabtab, tabtab));tabtab",
+  memo: "map<tabtab, tabtab> memo;tabtab",
+  gcd: "gcd(tabtab, tabtab)tabtab",
+  lcm: "(tabtab / gcd(tabtab, tabtab) * tabtab)tabtab",
+  mod: "const long long MOD = 1000000007LL;tabtab",
+  modpow: "auto modpow = [&](long long a, long long e, long long mod) {\n\t    long long res = 1;\n\t    while(e){\n\t        if(e & 1) res = res * a % mod;\n\t        a = a * a % mod;\n\t        e >>= 1;\n\t    }\n\t    return res;\n};tabtab",
+  sieve: "vector<int> prime(tabtab + 1, 1);\nprime[0] = prime[1] = 0;\nfor(int i = 2 ; i * i <= tabtab ; i++){\n\t    if(prime[i]){\n\t        for(int j = i * i ; j <= tabtab ; j += i) prime[j] = 0;\n\t    }\n\t}tabtab",
+  str: "string tabtab;tabtab",
+  freq26: "vector<int> freq(26, 0);\nfor(char c : tabtab) freq[c - 'a']++;tabtab",
+  sortstr: "sort(tabtab.begin(), tabtab.end());tabtab",
+  revstr: "reverse(tabtab.begin(), tabtab.end());tabtab",
+  substr: "tabtab.substr(tabtab, tabtab)tabtab",
+  cerr: "cerr << \"tabtab = \" << tabtab << \"\\n\";tabtab",
+  dbgvec: "for(auto x : tabtab) cerr << x << ' ';\ncerr << \"\\n\";tabtab",
+  dbgpair: "cerr << tabtab.first << ' ' << tabtab.second << \"\\n\";tabtab",
+  fastio: "ios::sync_with_stdio(false);\ncin.tie(nullptr);tabtab",
+  testcase: "int T;\ncin >> T;\nwhile(T--){\n\t    tabtab\n\t}tabtab",
+  solvefn: "void solve(){\n\t    tabtab\n\t}tabtab"
+};
+const DEFAULT_PYTHON_AUTO_COMPLETION_RULES = {
+  listint: "arr = list(map(int, input().split()))tabtab",
+  liststr: "arr = input().split()tabtab",
+  listn: "arr = [tabtab for _ in range(tabtab)]tabtab",
+  matint: "grid = [list(map(int, input().split())) for _ in range(tabtab)]tabtab",
+  setv: "seen = set()tabtab",
+  dictv: "mp = {}tabtab",
+  defdict: "from collections import defaultdict\nmp = defaultdict(int)tabtab",
+  dequev: "from collections import deque\nq = deque()tabtab",
+  heapv: "import heapq\nheap = []tabtab",
+  tuplev: "pair = (tabtab, tabtab)tabtab",
+  inp: "input()tabtab",
+  inint: "n = int(input())tabtab",
+  insplit: "a, b = map(int, input().split())tabtab",
+  printv: "print(tabtab)tabtab",
+  printarr: "print(*tabtab)tabtab",
+  fastin: "import sys\ninput = sys.stdin.readlinetabtab",
+  for: "for i in range(tabtab):\n\t    tabtab\ntabtab",
+  forn: "for i in range(n):\n\t    tabtab\ntabtab",
+  forr: "for i in range(tabtab - 1, -1, -1):\n\t    tabtab\ntabtab",
+  while: "while tabtab:\n\t    tabtab\ntabtab",
+  foreach: "for x in tabtab:\n\t    tabtab\ntabtab",
+  sortv: "tabtab.sort()tabtab",
+  rsortv: "tabtab.sort(reverse=True)tabtab",
+  revv: "tabtab.reverse()tabtab",
+  bisl: "bisect_left(tabtab, tabtab)tabtab",
+  bisr: "bisect_right(tabtab, tabtab)tabtab",
+  sumv: "sum(tabtab)tabtab",
+  minv: "min(tabtab)tabtab",
+  maxv: "max(tabtab)tabtab",
+  adj: "adj = [[] for _ in range(tabtab)]tabtab",
+  edgeu: "adj[u].append(v)\nadj[v].append(u)tabtab",
+  vis: "vis = [False] * tabtab",
+  bfs: "from collections import deque\nq = deque([tabtab])\nvis[tabtab] = True\nwhile q:\n\t    node = q.popleft()\n\t    tabtab\ntabtab",
+  dfs: "def dfs(node, parent):\n\t    tabtab\ndfs(tabtab, -1)tabtab",
+  dsu: "parent = list(range(tabtab))\nsize = [1] * tabtab\n\ndef find(x):\n\t    while parent[x] != x:\n\t        parent[x] = parent[parent[x]]\n\t        x = parent[x]\n\t    return x\n\ndef unite(a, b):\n\t    a, b = find(a), find(b)\n\t    if a == b:\n\t        return False\n\t    if size[a] < size[b]:\n\t        a, b = b, a\n\t    parent[b] = a\n\t    size[a] += size[b]\n\t    return True\ntabtab",
+  dp: "dp = [tabtab] * tabtab",
+  dp2: "dp = [[tabtab] * tabtab for _ in range(tabtab)]tabtab",
+  memo: "from functools import lru_cache\n\n@lru_cache(None)\ndef solve(tabtab):\n\t    tabtab\ntabtab",
+  gcd: "math.gcd(tabtab, tabtab)tabtab",
+  mod: "MOD = 10**9 + 7tabtab",
+  powmod: "pow(tabtab, tabtab, MOD)tabtab",
+  sieve: "prime = [True] * (tabtab + 1)\nprime[0] = prime[1] = False\nfor i in range(2, int(tabtab ** 0.5) + 1):\n\t    if prime[i]:\n\t        for j in range(i * i, tabtab + 1, i):\n\t            prime[j] = False\ntabtab",
+  strv: "s = input().strip()tabtab",
+  freq: "from collections import Counter\nfreq = Counter(tabtab)tabtab",
+  sortstr: "s = ''.join(sorted(s))tabtab",
+  revstr: "s = s[::-1]tabtab",
+  debug: "print(tabtab, file=sys.stderr)tabtab",
+  main: "def solve():\n\t    tabtab\n\nif __name__ == \"__main__\":\n\t    solve()tabtab",
+  testcase: "t = int(input())\nfor _ in range(t):\n\t    tabtab\ntabtab"
+};
+const AUTO_COMPLETION_CATEGORIES = {
+  initialisation: [
+    "vecint", "vecll", "vecchar", "vecstr", "vecbool", "vecvecint", "vecvecll",
+    "setint", "setll", "msetint", "pairint", "pairll", "vecpair", "vecpairll",
+    "mapintint", "mapstrint", "umapintint", "umap<int,char>", "usetint",
+    "pqint", "minpqint", "queueint", "stackint", "dequeint"
+  ],
+  io: ["cout", "cin", "fastio"],
+  loops: ["for", "forr", "rep", "while", "dowhile", "foreach"],
+  algorithms: ["sortv", "rsortv", "revv", "lb", "ub", "all", "acc", "minel", "maxel"],
+  graph: ["adj", "edgeu", "vis", "bfs", "dfs", "dsu"],
+  dp: ["dp", "dpll", "dp2", "dp2ll", "memo"],
+  math: ["gcd", "lcm", "mod", "modpow", "sieve"],
+  strings: ["str", "freq26", "sortstr", "revstr", "substr"],
+  debug: ["cerr", "dbgvec", "dbgpair"],
+  templates: ["testcase", "solvefn"],
+  custom: []
+};
+const PYTHON_AUTO_COMPLETION_CATEGORIES = {
+  initialisation: ["listint", "liststr", "listn", "matint", "setv", "dictv", "defdict", "dequev", "heapv", "tuplev"],
+  io: ["inp", "inint", "insplit", "printv", "printarr", "fastin"],
+  loops: ["for", "forn", "forr", "while", "foreach"],
+  algorithms: ["sortv", "rsortv", "revv", "bisl", "bisr", "sumv", "minv", "maxv"],
+  graph: ["adj", "edgeu", "vis", "bfs", "dfs", "dsu"],
+  dp: ["dp", "dp2", "memo"],
+  math: ["gcd", "mod", "powmod", "sieve"],
+  strings: ["strv", "freq", "sortstr", "revstr"],
+  debug: ["debug"],
+  templates: ["main", "testcase"],
+  custom: []
+};
+const AUTO_COMPLETION_DEFAULT_TABS = [
+  { id: "initialisation", label: "Initialisation", builtin: true },
+  { id: "io", label: "I/O", builtin: true },
+  { id: "loops", label: "Loops", builtin: true },
+  { id: "algorithms", label: "Algorithms", builtin: true },
+  { id: "graph", label: "Graph", builtin: true },
+  { id: "dp", label: "DP", builtin: true },
+  { id: "math", label: "Math", builtin: true },
+  { id: "strings", label: "Strings", builtin: true },
+  { id: "debug", label: "Debug", builtin: true },
+  { id: "templates", label: "Templates", builtin: true },
+  { id: "custom", label: "Custom", builtin: true }
+];
+const AUTO_COMPLETION_DEFAULT_RULES_VERSION = 4;
 const DEFAULT_AUTO_COMPLETION = {
   enabled: true,
   pairs: true,
   placeholder: "tabtab",
-  rules: {
-    for: "for(int i = 0 ; i < ntabtab ; i++){\n    tabtab\n}"
+  defaultRulesVersion: AUTO_COMPLETION_DEFAULT_RULES_VERSION,
+  tabs: AUTO_COMPLETION_DEFAULT_TABS,
+  categories: AUTO_COMPLETION_CATEGORIES,
+  rules: DEFAULT_AUTO_COMPLETION_RULES,
+  languageCategories: {
+    cpp: AUTO_COMPLETION_CATEGORIES,
+    python: PYTHON_AUTO_COMPLETION_CATEGORIES
+  },
+  disabledTabs: {
+    cpp: {},
+    python: {}
+  },
+  languageRules: {
+    cpp: DEFAULT_AUTO_COMPLETION_RULES,
+    python: DEFAULT_PYTHON_AUTO_COMPLETION_RULES
   }
 };
 let appearanceMode = APPEARANCE_MODES.includes(localStorage.getItem("rathee.appearanceMode"))
@@ -200,9 +381,15 @@ let codeSaveTimer = null;
 let currentLanguage = document.querySelector("#language").value;
 let editorQuickSettingsOpen = false;
 let settingsSaveTimer = null;
+let settingsSavePending = false;
 let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
+let autoCompletionDirty = false;
+const autoCompletionDeletedTriggers = new Set();
+let currentSettingsTab = "profile";
+let autoCompletionTriggerWidth = Number(localStorage.getItem("rathee.autoCompletionTriggerWidth") || 132);
+let activeAutoCompletionCategory = localStorage.getItem("rathee.autoCompletionCategory") || "initialisation";
 let snippetSession = null;
-let autoCompletionDraftOpen = false;
+let lastSnippetExpansion = null;
 const breakpointsByFile = {};
 const DEFAULT_SIDE_WIDTH = 22;
 const LAYOUT_SETTINGS_VERSION = 2;
@@ -268,7 +455,9 @@ function applyAppSettings(settings) {
   if (APPEARANCE_MODES.includes(appearance.mode)) appearanceMode = appearance.mode;
   if (APPEARANCE_THEMES.includes(appearance.theme)) appearanceTheme = appearance.theme;
   if (Number.isFinite(Number(appearance.zoom))) uiZoom = clampZoom(Number(appearance.zoom));
-  autoCompletion = normalizeAutoCompletionSettings(settings.autoCompletion);
+  if (settings.autoCompletion !== undefined) {
+    autoCompletion = normalizeAutoCompletionSettings(settings.autoCompletion);
+  }
 
   const layout = settings.layout || {};
   if (Number.isFinite(Number(layout.drawerWidth))) layoutState.drawerWidth = Number(layout.drawerWidth);
@@ -316,22 +505,115 @@ function currentAppSettings() {
 
 function normalizeAutoCompletionSettings(value) {
   const source = value && typeof value === "object" ? value : {};
-  const rulesSource = source.rules && typeof source.rules === "object" && !Array.isArray(source.rules)
-    ? source.rules
-    : DEFAULT_AUTO_COMPLETION.rules;
-  const rules = {};
-  Object.entries(rulesSource).forEach(([trigger, template]) => {
-    const cleanTrigger = String(trigger || "").trim();
-    if (!cleanTrigger || /\s/.test(cleanTrigger)) return;
-    rules[cleanTrigger] = String(template ?? "");
+  const sourceDefaultRulesVersion = Number(source.defaultRulesVersion) || 0;
+  const sourceTabs = Array.isArray(source.tabs) ? source.tabs : [];
+  const tabsById = new Map();
+  AUTO_COMPLETION_DEFAULT_TABS.forEach((tab) => tabsById.set(tab.id, { ...tab, builtin: true }));
+  sourceTabs.forEach((tab) => {
+    const id = String(tab?.id || "").trim();
+    const label = String(tab?.label || "").trim();
+    if (!id || !label || /\s/.test(id)) return;
+    const builtin = Boolean(AUTO_COMPLETION_CATEGORIES[id]);
+    tabsById.set(id, { id, label, builtin });
   });
+  const tabs = Array.from(tabsById.values()).sort((a, b) => {
+    const ai = AUTO_COMPLETION_DEFAULT_TABS.findIndex((tab) => tab.id === a.id);
+    const bi = AUTO_COMPLETION_DEFAULT_TABS.findIndex((tab) => tab.id === b.id);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return 0;
+  });
+  const sourceLanguageRules = source.languageRules && typeof source.languageRules === "object" && !Array.isArray(source.languageRules)
+    ? source.languageRules
+    : {};
+  const sourceLanguageCategories = source.languageCategories && typeof source.languageCategories === "object" && !Array.isArray(source.languageCategories)
+    ? source.languageCategories
+    : {};
+  const sourceDisabledTabs = source.disabledTabs && typeof source.disabledTabs === "object" && !Array.isArray(source.disabledTabs)
+    ? source.disabledTabs
+    : {};
+  const seedDefaults = sourceDefaultRulesVersion < AUTO_COMPLETION_DEFAULT_RULES_VERSION;
+
+  const normalizeRuleMap = (defaultRules, sourceRules) => {
+    const out = seedDefaults ? { ...defaultRules } : {};
+    const rulesSource = sourceRules && typeof sourceRules === "object" && !Array.isArray(sourceRules)
+      ? sourceRules
+      : {};
+    Object.entries(rulesSource).forEach(([trigger, template]) => {
+      const cleanTrigger = String(trigger || "").trim();
+      const cleanTemplate = String(template ?? "");
+      if (!cleanTrigger || /\s/.test(cleanTrigger) || !cleanTemplate.trim()) return;
+      out[cleanTrigger] = cleanTemplate;
+    });
+    return out;
+  };
+
+  const languageRules = {
+    cpp: normalizeRuleMap(DEFAULT_AUTO_COMPLETION_RULES, sourceLanguageRules.cpp || source.rules),
+    python: normalizeRuleMap(DEFAULT_PYTHON_AUTO_COMPLETION_RULES, sourceLanguageRules.python)
+  };
+
+  const normalizeCategoryMap = (language, defaultCategories, rules) => {
+    const sourceCategories = sourceLanguageCategories[language]
+      && typeof sourceLanguageCategories[language] === "object"
+      && !Array.isArray(sourceLanguageCategories[language])
+      ? sourceLanguageCategories[language]
+      : language === "cpp" && source.categories && typeof source.categories === "object" && !Array.isArray(source.categories)
+        ? source.categories
+        : {};
+    const categories = {};
+    tabs.forEach((tab) => {
+      const category = tab.id;
+      const baseTriggers = seedDefaults ? (defaultCategories[category] || []) : [];
+      const sourceTriggers = seedDefaults
+        ? []
+        : Array.isArray(sourceCategories[category]) ? sourceCategories[category] : [];
+      categories[category] = Array.from(new Set([...baseTriggers, ...sourceTriggers]
+        .map((trigger) => String(trigger || "").trim())
+        .filter((trigger) => trigger && Object.prototype.hasOwnProperty.call(rules, trigger))));
+    });
+    const categorizedTriggers = new Set(Object.values(categories).flat());
+    Object.keys(rules).forEach((trigger) => {
+      if (!categorizedTriggers.has(trigger)) categories.custom.push(trigger);
+    });
+    return categories;
+  };
+
+  const languageCategories = {
+    cpp: normalizeCategoryMap("cpp", AUTO_COMPLETION_CATEGORIES, languageRules.cpp),
+    python: normalizeCategoryMap("python", PYTHON_AUTO_COMPLETION_CATEGORIES, languageRules.python)
+  };
+  const normalizeDisabledTabs = (language) => {
+    const sourceForLanguage = sourceDisabledTabs[language] && typeof sourceDisabledTabs[language] === "object" && !Array.isArray(sourceDisabledTabs[language])
+      ? sourceDisabledTabs[language]
+      : {};
+    const allowed = new Set(tabs.map((tab) => tab.id));
+    return Object.fromEntries(Object.entries(sourceForLanguage)
+      .filter(([tabId, disabled]) => allowed.has(tabId) && disabled === true));
+  };
+  const disabledTabs = {
+    cpp: normalizeDisabledTabs("cpp"),
+    python: normalizeDisabledTabs("python")
+  };
 
   return {
     enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_AUTO_COMPLETION.enabled,
     pairs: typeof source.pairs === "boolean" ? source.pairs : DEFAULT_AUTO_COMPLETION.pairs,
     placeholder: cleanSnippetPlaceholder(source.placeholder),
-    rules
+    defaultRulesVersion: AUTO_COMPLETION_DEFAULT_RULES_VERSION,
+    tabs,
+    categories: languageCategories.cpp,
+    rules: languageRules.cpp,
+    languageCategories,
+    disabledTabs,
+    languageRules
   };
+}
+
+function shouldSeedDefaultAutoCompletion(value) {
+  if (!value || typeof value !== "object") return true;
+  return (Number(value.defaultRulesVersion) || 0) < AUTO_COMPLETION_DEFAULT_RULES_VERSION;
 }
 
 function cleanSnippetPlaceholder(value) {
@@ -339,80 +621,347 @@ function cleanSnippetPlaceholder(value) {
   return marker || DEFAULT_AUTO_COMPLETION.placeholder;
 }
 
+function currentAutoCompletionLanguage() {
+  return els.language?.value === "python" ? "python" : "cpp";
+}
+
+function currentAutoCompletionRules() {
+  const language = currentAutoCompletionLanguage();
+  return autoCompletion.languageRules?.[language] || autoCompletion.rules || {};
+}
+
+function currentAutoCompletionCategories() {
+  const language = currentAutoCompletionLanguage();
+  return autoCompletion.languageCategories?.[language] || autoCompletion.categories || {};
+}
+
+function currentAutoCompletionDisabledTabs() {
+  const language = currentAutoCompletionLanguage();
+  return autoCompletion.disabledTabs?.[language] || {};
+}
+
+function isAutoCompletionTabDisabled(category = activeAutoCompletionCategory) {
+  return Boolean(currentAutoCompletionDisabledTabs()[category]);
+}
+
+function currentAutoCompletionTabLabel(category = activeAutoCompletionCategory) {
+  return autoCompletion.tabs?.find((tab) => tab.id === category)?.label || category;
+}
+
+function currentEnabledAutoCompletionRules() {
+  const rules = currentAutoCompletionRules();
+  const categories = currentAutoCompletionCategories();
+  const disabledTabs = currentAutoCompletionDisabledTabs();
+  const allowed = new Set();
+  Object.entries(categories).forEach(([category, triggers]) => {
+    if (disabledTabs[category]) return;
+    (triggers || []).forEach((trigger) => allowed.add(trigger));
+  });
+  return Object.fromEntries(Object.entries(rules).filter(([trigger]) => allowed.has(trigger)));
+}
+
+function withCurrentAutoCompletionRules(rules) {
+  const language = currentAutoCompletionLanguage();
+  return normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    languageRules: {
+      ...(autoCompletion.languageRules || {}),
+      [language]: rules
+    },
+    ...(language === "cpp" ? { rules } : {})
+  });
+}
+
+function withCurrentAutoCompletionCategories(categories) {
+  const language = currentAutoCompletionLanguage();
+  return normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    languageCategories: {
+      ...(autoCompletion.languageCategories || {}),
+      [language]: categories
+    },
+    ...(language === "cpp" ? { categories } : {})
+  });
+}
+
+function setCurrentAutoCompletionDisabledTabs(disabledTabsForLanguage) {
+  const language = currentAutoCompletionLanguage();
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    disabledTabs: {
+      ...(autoCompletion.disabledTabs || {}),
+      [language]: disabledTabsForLanguage
+    }
+  });
+}
+
+function replaceSnippetMarkerInText(text, previousMarker, nextMarker) {
+  const source = String(text ?? "");
+  if (!previousMarker || previousMarker === nextMarker) return source;
+  return source.split(previousMarker).join(nextMarker);
+}
+
 function renderAutoCompletionSettings() {
   if (!els.autoCompletionEnabled || !els.autoCompletionRuleList) return;
+  const categories = currentAutoCompletionCategories();
+  const rules = currentAutoCompletionRules();
+  activeAutoCompletionCategory = categories?.[activeAutoCompletionCategory]
+    ? activeAutoCompletionCategory
+    : "initialisation";
+  applyAutoCompletionRuleLayout();
   els.autoCompletionEnabled.checked = Boolean(autoCompletion.enabled);
   if (els.autoCompletionPairs) els.autoCompletionPairs.checked = Boolean(autoCompletion.pairs);
   if (els.autoCompletionPlaceholder) els.autoCompletionPlaceholder.value = autoCompletion.placeholder;
+  renderAutoCompletionCategoryTabs();
+  updateAutoCompletionSaveUi();
   els.autoCompletionRuleList.innerHTML = "";
 
-  const entries = Object.entries(autoCompletion.rules);
-  if (!entries.length && !autoCompletionDraftOpen) {
-    const empty = document.createElement("p");
-    empty.className = "autocomplete-empty";
-    empty.textContent = "No rules yet.";
-    els.autoCompletionRuleList.append(empty);
-  }
-
+  const visibleTriggers = categories?.[activeAutoCompletionCategory] || [];
+  const entries = visibleTriggers
+    .filter((trigger) => Object.prototype.hasOwnProperty.call(rules, trigger))
+    .map((trigger) => [trigger, rules[trigger]]);
   entries.forEach(([trigger, template]) => {
-    els.autoCompletionRuleList.append(createAutoCompletionRuleCard({ trigger, template }));
+    els.autoCompletionRuleList.append(createAutoCompletionRuleRow({ trigger, template }));
   });
-
-  if (autoCompletionDraftOpen) {
-    els.autoCompletionRuleList.append(createAutoCompletionRuleCard({ isDraft: true }));
-  }
+  els.autoCompletionRuleList.append(createAutoCompletionRuleRow({ isDraft: true }));
+  els.autoCompletionRuleList.append(createAutoCompletionTabFooter());
 }
 
-function createAutoCompletionRuleCard({ trigger = "", template = "", isDraft = false }) {
-  const card = document.createElement("div");
-  card.className = "autocomplete-rule-card";
-  if (!isDraft) card.dataset.trigger = trigger;
+function createAutoCompletionTabFooter() {
+  const row = document.createElement("div");
+  row.className = "autocomplete-tab-footer";
 
-  const actions = document.createElement("div");
-  actions.className = "autocomplete-card-actions";
+  const label = document.createElement("span");
+  label.className = "autocomplete-tab-footer-label";
+  label.textContent = `${currentAutoCompletionTabLabel()} autocomplete`;
 
-  const triggerLabel = document.createElement("label");
-  const triggerText = document.createElement("span");
-  triggerText.textContent = "Trigger";
-  const triggerInput = document.createElement("input");
-  triggerInput.type = "text";
+  const toggle = document.createElement("label");
+  toggle.className = "setting-toggle autocomplete-tab-toggle";
+  toggle.title = `Pause or resume autocomplete for ${currentAutoCompletionTabLabel()}`;
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = !isAutoCompletionTabDisabled();
+  input.setAttribute("aria-label", `Enable ${currentAutoCompletionTabLabel()} autocomplete`);
+  input.addEventListener("change", () => setAutoCompletionTabEnabled(activeAutoCompletionCategory, input.checked));
+
+  const slider = document.createElement("span");
+  slider.className = "toggle-slider";
+  slider.setAttribute("aria-hidden", "true");
+
+  toggle.append(input, slider);
+  row.append(label, toggle);
+  return row;
+}
+
+function renderAutoCompletionCategoryTabs() {
+  if (!els.autoCompletionCategoryTabs) return;
+  els.autoCompletionCategoryTabs.innerHTML = "";
+  (autoCompletion.tabs || []).forEach((category) => {
+    const tab = document.createElement("button");
+    tab.className = "autocomplete-category-tab";
+    tab.type = "button";
+    tab.role = "tab";
+    tab.dataset.autocompleteCategory = category.id;
+    tab.textContent = category.label;
+    const isActive = tab.dataset.autocompleteCategory === activeAutoCompletionCategory;
+    tab.classList.toggle("active", isActive);
+    tab.classList.toggle("is-paused", Boolean(currentAutoCompletionDisabledTabs()[category.id]));
+    tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    els.autoCompletionCategoryTabs.append(tab);
+  });
+  const add = document.createElement("button");
+  add.className = "autocomplete-category-tab autocomplete-category-add";
+  add.type = "button";
+  add.title = "Add custom tab";
+  add.setAttribute("aria-label", "Add custom tab");
+  add.textContent = "+";
+  els.autoCompletionCategoryTabs.append(add);
+}
+
+function setAutoCompletionCategory(category) {
+  if (!currentAutoCompletionCategories()?.[category]) return;
+  activeAutoCompletionCategory = category;
+  localStorage.setItem("rathee.autoCompletionCategory", category);
+  renderAutoCompletionSettings();
+}
+
+function setAutoCompletionTabEnabled(category, enabled) {
+  if (!currentAutoCompletionCategories()?.[category]) return;
+  const disabledTabs = { ...currentAutoCompletionDisabledTabs() };
+  if (enabled) delete disabledTabs[category];
+  else disabledTabs[category] = true;
+  setCurrentAutoCompletionDisabledTabs(disabledTabs);
+  renderAutoCompletionSettings();
+  markAutoCompletionDirty();
+}
+
+function createAutoCompletionCustomTab() {
+  const label = String(window.prompt("Tab name") || "").trim();
+  if (!label) return;
+  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "custom";
+  const existing = new Set((autoCompletion.tabs || []).map((tab) => tab.id));
+  let id = `custom-${base}`;
+  let suffix = 2;
+  while (existing.has(id)) {
+    id = `custom-${base}-${suffix}`;
+    suffix += 1;
+  }
+  const tabs = [...(autoCompletion.tabs || []), { id, label, builtin: false }];
+  const languageCategories = {
+    cpp: { ...(autoCompletion.languageCategories?.cpp || autoCompletion.categories || {}), [id]: [] },
+    python: { ...(autoCompletion.languageCategories?.python || {}), [id]: [] }
+  };
+  const disabledTabs = {
+    cpp: { ...(autoCompletion.disabledTabs?.cpp || {}) },
+    python: { ...(autoCompletion.disabledTabs?.python || {}) }
+  };
+  autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, tabs, languageCategories, disabledTabs });
+  activeAutoCompletionCategory = id;
+  localStorage.setItem("rathee.autoCompletionCategory", id);
+  renderAutoCompletionSettings();
+  markAutoCompletionDirty();
+}
+
+function addAutoCompletionRuleToCategory(trigger, category = activeAutoCompletionCategory) {
+  if (!currentAutoCompletionCategories()?.[category]) return;
+  const categories = { ...currentAutoCompletionCategories() };
+  const triggers = new Set(categories[category] || []);
+  triggers.add(trigger);
+  categories[category] = Array.from(triggers);
+  autoCompletion = withCurrentAutoCompletionCategories(categories);
+}
+
+function replaceAutoCompletionRuleInCategories(previousTrigger, nextTrigger) {
+  const categories = {};
+  Object.entries(currentAutoCompletionCategories() || {}).forEach(([category, triggers]) => {
+    categories[category] = Array.from(new Set((triggers || []).map((trigger) => (
+      trigger === previousTrigger ? nextTrigger : trigger
+    ))));
+  });
+  autoCompletion = withCurrentAutoCompletionCategories(categories);
+}
+
+function removeAutoCompletionRuleFromCategories(triggerToRemove) {
+  const categories = {};
+  Object.entries(currentAutoCompletionCategories() || {}).forEach(([category, triggers]) => {
+    categories[category] = (triggers || []).filter((trigger) => trigger !== triggerToRemove);
+  });
+  autoCompletion = withCurrentAutoCompletionCategories(categories);
+}
+
+function autoSizeCompletionTextarea(textarea) {
+  if (!textarea) return;
+  if (!textarea.value) {
+    textarea.style.height = "36px";
+    return;
+  }
+  const lineCount = textarea.value.split("\n").length;
+  if (lineCount <= 1) {
+    textarea.style.height = "36px";
+    return;
+  }
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.max(36, textarea.scrollHeight)}px`;
+}
+
+function autoSizeAllCompletionTextareas() {
+  requestAnimationFrame(() => {
+    els.autoCompletionRuleList
+      ?.querySelectorAll(".autocomplete-expansion-input")
+      .forEach((textarea) => autoSizeCompletionTextarea(textarea));
+  });
+}
+
+function createAutoCompletionRuleRow({ trigger = "", template = "", isDraft = false }) {
+  const row = document.createElement("div");
+  row.className = "autocomplete-rule-row";
+  if (isDraft) row.classList.add("is-draft");
+  else row.dataset.trigger = trigger;
+
+  const triggerInput = document.createElement("textarea");
+  triggerInput.className = "autocomplete-trigger-input";
+  triggerInput.rows = 1;
   triggerInput.value = trigger;
-  triggerInput.placeholder = "for";
+  triggerInput.placeholder = "Trigger";
+  triggerInput.setAttribute("aria-label", "Trigger");
   triggerInput.spellcheck = false;
   triggerInput.autocomplete = "off";
-  triggerLabel.append(triggerText, triggerInput);
+  triggerInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") event.preventDefault();
+  });
 
-  const templateLabel = document.createElement("label");
-  const templateText = document.createElement("span");
-  templateText.textContent = "Expansion";
   const templateInput = document.createElement("textarea");
-  templateInput.className = "settings-codearea";
+  templateInput.className = "autocomplete-expansion-input";
   templateInput.value = template;
-  templateInput.placeholder = sampleAutoCompletionTemplate();
+  templateInput.setAttribute("aria-label", "Expansion");
   templateInput.spellcheck = false;
-  templateLabel.append(templateText, templateInput);
+  requestAnimationFrame(() => autoSizeCompletionTextarea(templateInput));
 
   if (isDraft) {
-    const maybeSaveDraft = () => addAutoCompletionRuleFromInputs(triggerInput, templateInput);
-    triggerInput.addEventListener("input", maybeSaveDraft);
-    templateInput.addEventListener("input", maybeSaveDraft);
+    const actionButton = createAutoCompletionIconButton({
+      type: "delete",
+      label: "Clear draft rule"
+    });
+    const commitDraftIfLeavingRow = (event) => {
+      if (event.relatedTarget && row.contains(event.relatedTarget)) return;
+      addAutoCompletionRuleFromInputs(triggerInput, templateInput);
+    };
+    triggerInput.addEventListener("input", () => {
+      if (!/\s/.test(triggerInput.value)) triggerInput.classList.remove("is-invalid");
+    });
+    templateInput.addEventListener("input", () => {
+      autoSizeCompletionTextarea(templateInput);
+    });
+    row.addEventListener("focusout", commitDraftIfLeavingRow);
+    actionButton.addEventListener("click", () => {
+      triggerInput.value = "";
+      templateInput.value = "";
+      triggerInput.classList.remove("is-invalid");
+      autoSizeCompletionTextarea(templateInput);
+      triggerInput.focus();
+    });
+    row.append(triggerInput, templateInput, actionButton);
   } else {
     const actionButton = createAutoCompletionIconButton({
       type: "delete",
       label: "Delete rule"
     });
-    actions.append(actionButton);
     triggerInput.addEventListener("change", () => renameAutoCompletionRule(trigger, triggerInput.value));
-    templateInput.addEventListener("input", () => updateAutoCompletionRule(trigger, templateInput.value));
+    templateInput.addEventListener("input", () => {
+      autoSizeCompletionTextarea(templateInput);
+      updateAutoCompletionRule(trigger, templateInput.value);
+    });
     actionButton.addEventListener("click", () => deleteAutoCompletionRule(trigger));
+    row.append(triggerInput, templateInput, actionButton);
   }
 
-  const side = document.createElement("div");
-  side.className = "autocomplete-card-side";
-  side.append(triggerLabel, actions);
+  return row;
+}
 
-  card.append(side, templateLabel);
-  return card;
+function applyAutoCompletionRuleLayout() {
+  autoCompletionTriggerWidth = clamp(autoCompletionTriggerWidth, 86, 260);
+  document.documentElement.style.setProperty("--autocomplete-trigger-width", `${autoCompletionTriggerWidth}px`);
+  localStorage.setItem("rathee.autoCompletionTriggerWidth", String(autoCompletionTriggerWidth));
+}
+
+function startAutoCompletionColumnResize(event) {
+  event.preventDefault();
+  const divider = event.currentTarget;
+  divider?.classList.add("is-dragging");
+  const startX = event.clientX;
+  const startWidth = autoCompletionTriggerWidth;
+  const onMove = (moveEvent) => {
+    autoCompletionTriggerWidth = clamp(startWidth + moveEvent.clientX - startX, 86, 260);
+    applyAutoCompletionRuleLayout();
+  };
+  const onUp = () => {
+    divider?.classList.remove("is-dragging");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp, { once: true });
 }
 
 function createAutoCompletionIconButton({ type, label }) {
@@ -436,9 +985,53 @@ function createAutoCompletionIconButton({ type, label }) {
   return button;
 }
 
+function closeHelpPopover() {
+  document.querySelector(".settings-help-popover")?.remove();
+  document.querySelectorAll(".info-button.is-open").forEach((button) => button.classList.remove("is-open"));
+}
+
+function toggleHelpPopover(button) {
+  const wasOpen = button.classList.contains("is-open");
+  closeHelpPopover();
+  if (wasOpen) return;
+  const text = button.dataset.helpText || button.title || "";
+  if (!text) return;
+  const popover = document.createElement("div");
+  popover.className = "settings-help-popover";
+  popover.textContent = text;
+  document.body.append(popover);
+  button.classList.add("is-open");
+  const rect = button.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 24);
+  const left = Math.min(window.innerWidth - width - 12, Math.max(12, rect.left));
+  popover.style.width = `${width}px`;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${rect.bottom + 8}px`;
+}
+
 function sampleAutoCompletionTemplate() {
   const marker = autoCompletion.placeholder;
-  return `for(int i = 0 ; i < n${marker} ; i++){\n    ${marker}\n}`;
+  return `for(int i = 0 ; i < n${marker} ; i++){\n\t    ${marker}\n\t}${marker}`;
+}
+
+function markAutoCompletionDirty() {
+  autoCompletionDirty = true;
+  updateAutoCompletionSaveUi();
+}
+
+function updateAutoCompletionSaveUi(message = "") {
+  if (els.autoCompletionSaveBtn) {
+    els.autoCompletionSaveBtn.disabled = !autoCompletionDirty || !isAuthed();
+    els.autoCompletionSaveBtn.textContent = autoCompletionDirty ? "Save" : "Saved";
+    els.autoCompletionSaveBtn.title = isAuthed()
+      ? "Save autocomplete settings to your account"
+      : "Sign in to save autocomplete settings to your account";
+  }
+  if (els.autoCompletionSaveStatus) {
+    els.autoCompletionSaveStatus.textContent = message || (autoCompletionDirty
+      ? "Unsaved"
+      : isAuthed() ? "Synced" : "Local only");
+  }
 }
 
 function setAutoCompletionEnabled(enabled) {
@@ -446,7 +1039,7 @@ function setAutoCompletionEnabled(enabled) {
     ...autoCompletion,
     enabled
   });
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function setAutoCompletionPairs(enabled) {
@@ -454,30 +1047,38 @@ function setAutoCompletionPairs(enabled) {
     ...autoCompletion,
     pairs: enabled
   });
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function setAutoCompletionPlaceholder(value) {
+  const previousPlaceholder = autoCompletion.placeholder;
+  const nextPlaceholder = cleanSnippetPlaceholder(value);
+  const languageRules = {};
+  Object.entries(autoCompletion.languageRules || { cpp: autoCompletion.rules || {} }).forEach(([language, rules]) => {
+    languageRules[language] = Object.fromEntries(Object.entries(rules || {}).map(([trigger, template]) => [
+      trigger,
+      replaceSnippetMarkerInText(template, previousPlaceholder, nextPlaceholder)
+    ]));
+  });
   autoCompletion = normalizeAutoCompletionSettings({
     ...autoCompletion,
-    placeholder: value
+    placeholder: nextPlaceholder,
+    languageRules,
+    rules: languageRules.cpp || autoCompletion.rules
   });
   if (els.autoCompletionPlaceholder && els.autoCompletionPlaceholder.value !== autoCompletion.placeholder) {
     els.autoCompletionPlaceholder.value = autoCompletion.placeholder;
   }
   renderAutoCompletionSettings();
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function updateAutoCompletionRule(trigger, template) {
-  autoCompletion = normalizeAutoCompletionSettings({
-    ...autoCompletion,
-    rules: {
-      ...autoCompletion.rules,
-      [trigger]: template
-    }
+  autoCompletion = withCurrentAutoCompletionRules({
+    ...currentAutoCompletionRules(),
+    [trigger]: template
   });
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function renameAutoCompletionRule(previousTrigger, nextTrigger) {
@@ -487,26 +1088,25 @@ function renameAutoCompletionRule(previousTrigger, nextTrigger) {
     return;
   }
 
-  const rules = { ...autoCompletion.rules };
+  const rules = { ...currentAutoCompletionRules() };
   const template = rules[previousTrigger] ?? "";
   delete rules[previousTrigger];
   rules[cleanTrigger] = template;
-  autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, rules });
+  if (cleanTrigger !== previousTrigger) autoCompletionDeletedTriggers.add(previousTrigger);
+  autoCompletion = withCurrentAutoCompletionRules(rules);
+  replaceAutoCompletionRuleInCategories(previousTrigger, cleanTrigger);
   renderAutoCompletionSettings();
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function deleteAutoCompletionRule(trigger) {
-  const rules = { ...autoCompletion.rules };
+  const rules = { ...currentAutoCompletionRules() };
   delete rules[trigger];
-  autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, rules });
+  autoCompletionDeletedTriggers.add(trigger);
+  autoCompletion = withCurrentAutoCompletionRules(rules);
+  removeAutoCompletionRuleFromCategories(trigger);
   renderAutoCompletionSettings();
-  scheduleAppSettingsSave();
-}
-
-function showAutoCompletionDraftRule() {
-  autoCompletionDraftOpen = true;
-  renderAutoCompletionSettings();
+  markAutoCompletionDirty();
 }
 
 function addAutoCompletionRuleFromInputs(triggerInput, templateInput) {
@@ -523,30 +1123,118 @@ function addAutoCompletionRuleFromInputs(triggerInput, templateInput) {
   }
 
   triggerInput?.classList.remove("is-invalid");
-  autoCompletion = normalizeAutoCompletionSettings({
-    ...autoCompletion,
-    rules: {
-      ...autoCompletion.rules,
-      [trigger]: template
-    }
+  autoCompletion = withCurrentAutoCompletionRules({
+    ...currentAutoCompletionRules(),
+    [trigger]: template
   });
-  autoCompletionDraftOpen = false;
+  addAutoCompletionRuleToCategory(trigger);
   renderAutoCompletionSettings();
-  scheduleAppSettingsSave();
+  markAutoCompletionDirty();
 }
 
 function scheduleAppSettingsSave() {
   clearTimeout(settingsSaveTimer);
+  settingsSavePending = true;
   settingsSaveTimer = setTimeout(() => {
-    if (!isAuthed()) return; // anonymous: settings are not persisted server-side
-    fetch("/api/me/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings: currentAppSettings() })
-    }).catch(() => {
+    saveAppSettingsNow().catch(() => {
       // Settings still remain active in memory if the save fails.
     });
   }, 250);
+}
+
+async function saveAppSettingsNow({ keepalive = false } = {}) {
+  clearTimeout(settingsSaveTimer);
+  if (!isAuthed()) return; // anonymous: settings are not persisted server-side
+  const settings = currentAppSettings();
+  if (autoCompletionDirty) {
+    if (keepalive) return;
+    const accountSettings = await fetchAccountSettings().catch(() => null);
+    if (accountSettings?.autoCompletion !== undefined) {
+      settings.autoCompletion = accountSettings.autoCompletion;
+    } else {
+      delete settings.autoCompletion;
+    }
+  }
+  const response = await fetch("/api/me/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings }),
+    keepalive
+  });
+  if (!response.ok) throw new Error("Settings save failed.");
+  settingsSavePending = false;
+  return response;
+}
+
+async function fetchAccountSettings() {
+  if (!isAuthed()) return null;
+  const response = await fetch("/api/me/workspace", { cache: "no-store" });
+  if (!response.ok) throw new Error("Settings load failed.");
+  const data = await response.json();
+  return data.settings || {};
+}
+
+async function saveAutoCompletionSettings() {
+  if (!isAuthed()) {
+    updateAutoCompletionSaveUi("Sign in to sync");
+    return;
+  }
+  updateAutoCompletionSaveUi("Saving...");
+  const accountSettings = await fetchAccountSettings();
+  const accountAutoCompletion = normalizeAutoCompletionSettings(accountSettings?.autoCompletion);
+  const language = currentAutoCompletionLanguage();
+  const rules = { ...(accountAutoCompletion.languageRules?.[language] || {}) };
+  autoCompletionDeletedTriggers.forEach((trigger) => delete rules[trigger]);
+  Object.assign(rules, currentAutoCompletionRules());
+  const languageRules = {
+    ...(accountAutoCompletion.languageRules || {}),
+    ...(autoCompletion.languageRules || {}),
+    [language]: rules
+  };
+  const languageCategories = {
+    ...(accountAutoCompletion.languageCategories || {}),
+    ...(autoCompletion.languageCategories || {}),
+    [language]: currentAutoCompletionCategories()
+  };
+  const mergedAutoCompletion = normalizeAutoCompletionSettings({
+    ...accountAutoCompletion,
+    enabled: autoCompletion.enabled,
+    pairs: autoCompletion.pairs,
+    placeholder: autoCompletion.placeholder,
+    tabs: autoCompletion.tabs,
+    disabledTabs: autoCompletion.disabledTabs,
+    categories: languageCategories.cpp,
+    rules: languageRules.cpp,
+    languageCategories,
+    languageRules
+  });
+  const mergedSettings = {
+    ...currentAppSettings(),
+    ...(accountSettings || {}),
+    autoCompletion: mergedAutoCompletion
+  };
+  const response = await fetch("/api/me/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings: mergedSettings })
+  });
+  if (!response.ok) throw new Error("Autocomplete save failed.");
+  autoCompletion = mergedAutoCompletion;
+  autoCompletionDirty = false;
+  autoCompletionDeletedTriggers.clear();
+  renderAutoCompletionSettings();
+  updateAutoCompletionSaveUi("Saved");
+}
+
+async function refreshAutoCompletionFromAccount({ force = false } = {}) {
+  if (!isAuthed() || (!force && autoCompletionDirty)) return;
+  const accountSettings = await fetchAccountSettings();
+  if (!accountSettings || accountSettings.autoCompletion === undefined) return;
+  autoCompletion = normalizeAutoCompletionSettings(accountSettings.autoCompletion);
+  autoCompletionDirty = false;
+  autoCompletionDeletedTriggers.clear();
+  renderAutoCompletionSettings();
+  updateAutoCompletionSaveUi("Synced");
 }
 
 function boot() {
@@ -603,6 +1291,22 @@ function boot() {
   els.settingsTabs.forEach((tab) => {
     tab.addEventListener("click", () => switchSettingsTab(tab.dataset.settingsTab));
   });
+  document.querySelectorAll(".info-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleHelpPopover(button);
+    });
+  });
+  document.querySelector(".autocomplete-col-divider")?.addEventListener("pointerdown", startAutoCompletionColumnResize);
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest?.(".settings-help-popover") && !event.target.closest?.(".info-button")) {
+      closeHelpPopover();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeHelpPopover();
+  });
   els.modeLightBtn.addEventListener("click", () => setAppearanceMode("light"));
   els.modeDarkBtn.addEventListener("click", () => setAppearanceMode("dark"));
   els.uiZoomRange?.addEventListener("input", (event) => setUiZoom(event.target.value));
@@ -648,8 +1352,37 @@ function boot() {
   els.autoCompletionEnabled?.addEventListener("change", () => setAutoCompletionEnabled(els.autoCompletionEnabled.checked));
   els.autoCompletionPairs?.addEventListener("change", () => setAutoCompletionPairs(els.autoCompletionPairs.checked));
   els.autoCompletionPlaceholder?.addEventListener("change", () => setAutoCompletionPlaceholder(els.autoCompletionPlaceholder.value));
-  els.autoCompletionCreateRuleBtn?.addEventListener("click", showAutoCompletionDraftRule);
+  els.autoCompletionCategoryTabs?.addEventListener("click", (event) => {
+    const tab = event.target.closest?.(".autocomplete-category-tab");
+    if (!tab) return;
+    if (tab.classList.contains("autocomplete-category-add")) {
+      createAutoCompletionCustomTab();
+      return;
+    }
+    setAutoCompletionCategory(tab.dataset.autocompleteCategory);
+  });
+  els.autoCompletionSaveBtn?.addEventListener("click", () => {
+    saveAutoCompletionSettings().catch(() => updateAutoCompletionSaveUi("Save failed"));
+  });
   els.codeforcesHandleInput.addEventListener("input", () => setCodeforcesHandle(els.codeforcesHandleInput.value));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && settingsSavePending) {
+      saveAppSettingsNow({ keepalive: true }).catch(() => {});
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    if (settingsSavePending) saveAppSettingsNow({ keepalive: true }).catch(() => {});
+  });
+  window.addEventListener("focus", () => {
+    if (currentSettingsTab === "autocomplete") {
+      refreshAutoCompletionFromAccount().catch(() => {});
+    }
+  });
+  setInterval(() => {
+    if (!els.settingsOverlay.hidden && currentSettingsTab === "autocomplete") {
+      refreshAutoCompletionFromAccount().catch(() => {});
+    }
+  }, 5000);
   els.saveTemplateBtn.addEventListener("click", saveTemplateFilesFromEditor);
   els.saveFilesBtn.addEventListener("click", promptLoginToSave);
   els.resetCodeBtn.addEventListener("click", handleEditorAction);
@@ -753,8 +1486,10 @@ async function applyAccountSettingsAndTemplates(justLoggedIn) {
   const data = await res.json();
 
   if (data.settings && Object.keys(data.settings).length) {
+    const needsAutoCompletionSeed = shouldSeedDefaultAutoCompletion(data.settings.autoCompletion);
     applyAppSettings(data.settings);
     reapplyAllSettings();
+    if (needsAutoCompletionSeed) scheduleAppSettingsSave();
   } else if (justLoggedIn) {
     scheduleAppSettingsSave(); // seed account settings from current values
   }
@@ -1346,12 +2081,9 @@ function codeMirrorOptions() {
       // normal insert caret always.
       Insert: false,
       Tab(cm) {
+        clearLastSnippetExpansion();
         if (moveToNextSnippetStop(cm)) return;
-        if (cm.somethingSelected()) {
-          cm.indentSelection("add");
-        } else {
-          cm.replaceSelection("    ", "end");
-        }
+        clearSnippetSession();
       }
     }
   };
@@ -1360,6 +2092,12 @@ function codeMirrorOptions() {
 function handleEditorKeyDown(cm, event) {
   if (!autoCompletion.enabled || cm.getOption("readOnly")) return;
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+
+  if (event.key === "Backspace" && undoLastSnippetExpansion(cm)) {
+    event.preventDefault();
+    return;
+  }
+  if (event.key !== "Backspace") clearLastSnippetExpansion();
 
   const pairs = {
     "(": ")",
@@ -1426,7 +2164,8 @@ function handleEditorInputRead(cm, change) {
 function expandSnippetAtCursor(cm) {
   const cursor = cm.getCursor();
   const lineBeforeCursor = cm.getLine(cursor.line).slice(0, cursor.ch);
-  const trigger = Object.keys(autoCompletion.rules)
+  const rules = currentEnabledAutoCompletionRules();
+  const trigger = Object.keys(rules)
     .filter((candidate) => lineBeforeCursor.endsWith(candidate))
     .sort((a, b) => b.length - a.length)[0];
 
@@ -1435,8 +2174,9 @@ function expandSnippetAtCursor(cm) {
   const beforeTrigger = triggerStart > 0 ? lineBeforeCursor[triggerStart - 1] : "";
   if (beforeTrigger && /[A-Za-z0-9_]/.test(beforeTrigger)) return;
 
-  const snippet = parseSnippetTemplate(autoCompletion.rules[trigger]);
+  const snippet = parseSnippetTemplate(rules[trigger]);
   const from = { line: cursor.line, ch: triggerStart };
+  const to = positionFromTextOffset(snippet.text, snippet.text.length, from);
   cm.operation(() => {
     clearSnippetSession();
     cm.replaceRange(snippet.text, from, cursor, "+completion");
@@ -1450,6 +2190,13 @@ function expandSnippetAtCursor(cm) {
     } else {
       cm.setCursor(positionFromTextOffset(snippet.text, snippet.text.length, from));
     }
+    lastSnippetExpansion = {
+      from,
+      to,
+      trigger,
+      cursor: cm.getCursor(),
+      generation: typeof cm.changeGeneration === "function" ? cm.changeGeneration() : null
+    };
   });
 }
 
@@ -1497,6 +2244,31 @@ function moveToNextSnippetStop(cm) {
   }
   cm.setCursor(position);
   return true;
+}
+
+function sameEditorPosition(a, b) {
+  return Boolean(a && b && a.line === b.line && a.ch === b.ch);
+}
+
+function undoLastSnippetExpansion(cm) {
+  if (!lastSnippetExpansion || cm.somethingSelected()) return false;
+  const { from, to, trigger, cursor, generation } = lastSnippetExpansion;
+  if (!sameEditorPosition(cm.getCursor(), cursor)) return false;
+  if (generation !== null && typeof cm.isClean === "function" && !cm.isClean(generation)) {
+    clearLastSnippetExpansion();
+    return false;
+  }
+  cm.operation(() => {
+    clearSnippetSession();
+    cm.replaceRange(trigger, from, to, "+completionUndo");
+    cm.setCursor({ line: from.line, ch: from.ch + trigger.length });
+  });
+  clearLastSnippetExpansion();
+  return true;
+}
+
+function clearLastSnippetExpansion() {
+  lastSnippetExpansion = null;
 }
 
 function clearSnippetSession() {
@@ -1696,6 +2468,7 @@ function openTemplateSettingsFile(view) {
 
 function switchSettingsTab(tabName) {
   const target = ["profile", "appearance", "editor", "templates", "autocomplete"].includes(tabName) ? tabName : "profile";
+  currentSettingsTab = target;
   els.settingsTabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.settingsTab === target);
   });
@@ -1704,6 +2477,10 @@ function switchSettingsTab(tabName) {
   els.profileSettings.hidden = target !== "profile";
   els.templateSettings.hidden = target !== "templates";
   els.autoCompletionSettings.hidden = target !== "autocomplete";
+  if (target === "autocomplete") {
+    autoSizeAllCompletionTextareas();
+    refreshAutoCompletionFromAccount().catch(() => {});
+  }
 }
 
 function applyAppearance() {
@@ -2176,6 +2953,7 @@ function switchLanguage() {
   renderFileTabs();
   renderSavedContests(); // open-contest file rows are language-specific
   renderFolders();
+  if (!els.settingsOverlay.hidden && currentSettingsTab === "autocomplete") renderAutoCompletionSettings();
   updateEditorEmptyState();
   updateEditorActionButton();
   setStatus("Idle", "idle");

@@ -2332,21 +2332,214 @@ textarea,
   padding-right: 34px;
 }
 
-.autocomplete-compact-row {
-  padding-top: 8px;
-  padding-bottom: 8px;
+.autocomplete-options-row {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(180px, 240px);
+  align-items: center;
+  gap: 72px;
+  padding: 8px 0 12px;
 }
 
-.autocomplete-compact-row select,
-.autocomplete-compact-row input[type="text"],
-.autocomplete-compact-row .setting-toggle {
+.autocomplete-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.autocomplete-marker-option input {
+  width: 82px;
   min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--panel-solid);
+}
+
+.info-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+.info-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.info-button:hover,
+.info-button:focus-visible,
+.info-button.is-open {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.settings-help-popover {
+  position: fixed;
+  z-index: 4000;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-soft);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.autocomplete-table {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--panel-solid);
+}
+
+.autocomplete-category-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  background: var(--panel-solid);
+  overflow: visible;
+}
+
+.autocomplete-category-tab {
+  min-height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.autocomplete-category-tab:last-child {
+  border-right: 0;
+}
+
+.autocomplete-category-tab:hover,
+.autocomplete-category-tab:focus-visible {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.autocomplete-category-tab.active {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.autocomplete-category-tab.is-paused {
+  color: var(--muted);
+  opacity: 0.62;
+}
+
+.autocomplete-category-add {
+  min-width: 36px;
+  color: var(--accent);
+}
+
+.autocomplete-table-head {
+  display: grid;
+  grid-template-columns: var(--autocomplete-trigger-width, 132px) minmax(0, 1fr);
+  align-items: stretch;
+  column-gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.autocomplete-th {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.autocomplete-th-expansion {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.autocomplete-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.autocomplete-col-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--autocomplete-trigger-width, 132px);
+  width: 9px;
+  margin-left: -4px;
+  z-index: 3;
+  cursor: col-resize;
+}
+
+.autocomplete-col-divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--line);
+}
+
+.autocomplete-col-divider:hover::before,
+.autocomplete-col-divider.is-dragging::before {
+  left: 3px;
+  width: 3px;
+  background: rgba(var(--accent-rgb), 0.65);
+}
+
+.autocomplete-save-status {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.autocomplete-save-button {
+  min-height: 28px;
 }
 
 .setting-row--stack {
   grid-template-columns: 1fr;
   align-items: stretch;
   gap: 12px;
+}
+
+.setting-row--bare {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .setting-row > span {
@@ -2471,7 +2664,9 @@ textarea,
 
 .autocomplete-rule-list {
   display: grid;
-  gap: 10px;
+  gap: 0;
+  overflow: visible;
+  background: var(--panel-solid);
 }
 
 .autocomplete-rules-head {
@@ -2505,66 +2700,99 @@ textarea,
   stroke-linejoin: round;
 }
 
-.autocomplete-rule-card {
+.autocomplete-rule-row {
   display: grid;
-  grid-template-columns: minmax(150px, 0.24fr) minmax(0, 1fr);
-  align-items: start;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel-solid);
+  grid-template-columns: var(--autocomplete-trigger-width, 132px) minmax(0, 1fr) 36px;
+  align-items: stretch;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line);
 }
 
-.autocomplete-card-side {
-  display: grid;
-  align-self: stretch;
-  gap: 10px;
+.autocomplete-rule-row:last-child {
+  border-bottom: 0;
 }
 
-.autocomplete-card-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.autocomplete-rule-card label {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.autocomplete-rule-card label > span {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.autocomplete-rule-card input {
+.autocomplete-rule-row input,
+.autocomplete-rule-row .autocomplete-trigger-input,
+.autocomplete-rule-row .autocomplete-expansion-input {
   width: 100%;
   min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 0 !important;
   color: var(--text);
-  background: var(--panel-2);
+  background: transparent;
+  font: inherit;
+  font-size: 0.86rem;
 }
 
-.autocomplete-rule-card .settings-codearea {
-  min-height: 108px;
-  resize: both;
-  background: var(--panel-2);
+.autocomplete-rule-row input,
+.autocomplete-rule-row .autocomplete-trigger-input {
+  align-self: stretch;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.autocomplete-rule-row input:focus,
+.autocomplete-rule-row .autocomplete-trigger-input:focus,
+.autocomplete-rule-row .autocomplete-expansion-input:focus {
+  outline: 2px solid rgba(var(--accent-rgb), 0.35);
+  outline-offset: -2px;
+}
+
+.autocomplete-rule-row .autocomplete-trigger-input {
+  height: auto;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.autocomplete-rule-row .autocomplete-expansion-input {
+  resize: vertical;
+  line-height: 1.35;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--editor-font-family);
+  font-size: 0.86rem;
 }
 
 .autocomplete-delete {
   color: var(--danger);
+  width: 36px;
+  height: auto;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 1px 0 0 var(--line);
+  align-self: stretch;
+  align-items: start;
+  padding-top: 8px;
 }
 
-.autocomplete-empty {
-  margin: 0;
+.autocomplete-rule-row.is-draft {
+  background: rgba(var(--accent-rgb), 0.03);
+}
+
+.autocomplete-tab-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 42px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.autocomplete-tab-footer-label {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.autocomplete-tab-toggle {
+  min-height: 28px;
 }
 
 .setting-action-button {
@@ -3160,12 +3388,30 @@ textarea,
    Responsive
    ============================================================ */
 @media (max-width: 820px) {
-  .autocomplete-rule-card {
+  .autocomplete-options-row {
     grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
-  .autocomplete-delete {
-    justify-self: stretch;
+  .autocomplete-option {
+    justify-content: space-between;
+  }
+
+  .autocomplete-category-tabs {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .autocomplete-category-tab {
+    flex: 1 1 auto;
+  }
+
+  .autocomplete-table-head {
+    grid-template-columns: var(--autocomplete-trigger-width, 96px) minmax(0, 1fr);
+  }
+
+  .autocomplete-rule-row {
+    grid-template-columns: var(--autocomplete-trigger-width, 96px) minmax(0, 1fr) 36px;
   }
 
   .app-shell {

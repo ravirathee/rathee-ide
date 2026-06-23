@@ -470,37 +470,63 @@
               </button>
             </div>
             <div id="autoCompletionSettings" class="settings-content" hidden>
-              <label class="setting-row autocomplete-compact-row">
-                <span>Auto completion</span>
-                <span class="setting-toggle">
-                  <input id="autoCompletionEnabled" type="checkbox" />
-                  <span class="toggle-slider" aria-hidden="true"></span>
-                  <span>Enabled</span>
-                </span>
-              </label>
-              <label class="setting-row autocomplete-compact-row">
-                <span>Matching pairs</span>
-                <span class="setting-toggle">
-                  <input id="autoCompletionPairs" type="checkbox" />
-                  <span class="toggle-slider" aria-hidden="true"></span>
-                  <span>Insert matching parentheses and quotes</span>
-                </span>
-              </label>
-              <label class="setting-row autocomplete-compact-row">
-                <span>Cursor marker</span>
-                <input id="autoCompletionPlaceholder" type="text" spellcheck="false" autocomplete="off" />
-              </label>
-              <div class="setting-row setting-row--stack">
-                <div class="autocomplete-rules-head">
-                  <span>Rules</span>
-                  <button id="autoCompletionCreateRuleBtn" class="icon-button autocomplete-icon-button" type="button" title="Add rule" aria-label="Add rule">
+              <div class="autocomplete-options-row">
+                <div class="autocomplete-option">
+                  <button class="info-button" type="button" data-help-text="Turns custom trigger expansions on or off. When enabled, type a trigger in the editor and press Tab to replace it with its expansion." title="Turns custom trigger expansions on or off. When enabled, typing a trigger and pressing Tab expands it." aria-label="About auto complete">
                     <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                      <path d="M12 5v14" />
-                      <path d="M5 12h14" />
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M9.8 9a2.3 2.3 0 0 1 4.4.9c0 1.8-2.2 2.1-2.2 3.6" />
+                      <path d="M12 17h.01" />
                     </svg>
                   </button>
+                  <label for="autoCompletionEnabled">Auto complete</label>
+                  <label class="setting-toggle" for="autoCompletionEnabled">
+                    <input id="autoCompletionEnabled" type="checkbox" />
+                    <span class="toggle-slider" aria-hidden="true"></span>
+                  </label>
                 </div>
-                <div id="autoCompletionRuleList" class="autocomplete-rule-list"></div>
+                <div class="autocomplete-option">
+                  <button class="info-button" type="button" data-help-text="Automatically inserts the closing bracket, parenthesis, brace, quote, or apostrophe while editing code." title="Automatically inserts the closing bracket, parenthesis, brace, quote, or apostrophe while editing code." aria-label="About matching pairs">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M9.8 9a2.3 2.3 0 0 1 4.4.9c0 1.8-2.2 2.1-2.2 3.6" />
+                      <path d="M12 17h.01" />
+                    </svg>
+                  </button>
+                  <label for="autoCompletionPairs">Matching pairs</label>
+                  <label class="setting-toggle" for="autoCompletionPairs">
+                    <input id="autoCompletionPairs" type="checkbox" />
+                    <span class="toggle-slider" aria-hidden="true"></span>
+                  </label>
+                </div>
+                <div class="autocomplete-option autocomplete-marker-option">
+                  <button class="info-button" type="button" data-help-text="Text used inside an expansion to mark where the cursor should land after expanding. Example: use tabtab in the expansion, then the cursor lands there after Tab expansion." title="Text used inside an expansion to mark where the cursor should land after expanding. Example: tabtab." aria-label="About cursor marker">
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M9.8 9a2.3 2.3 0 0 1 4.4.9c0 1.8-2.2 2.1-2.2 3.6" />
+                      <path d="M12 17h.01" />
+                    </svg>
+                  </button>
+                  <label for="autoCompletionPlaceholder">Cursor marker</label>
+                  <input id="autoCompletionPlaceholder" type="text" spellcheck="false" autocomplete="off" />
+                </div>
+              </div>
+              <div class="setting-row setting-row--stack setting-row--bare">
+                <div id="autoCompletionCategoryTabs" class="autocomplete-category-tabs" role="tablist" aria-label="Autocomplete categories"></div>
+                <div class="autocomplete-table">
+                  <div class="autocomplete-table-head">
+                    <span class="autocomplete-th">Trigger</span>
+                    <div class="autocomplete-th autocomplete-th-expansion">
+                      <span>Expansion</span>
+                      <span class="autocomplete-head-actions">
+                        <span id="autoCompletionSaveStatus" class="autocomplete-save-status"></span>
+                        <button id="autoCompletionSaveBtn" class="small-button autocomplete-save-button" type="button">Save</button>
+                      </span>
+                    </div>
+                  </div>
+                  <div id="autoCompletionRuleList" class="autocomplete-rule-list"></div>
+                  <div class="autocomplete-col-divider" title="Resize trigger column" aria-hidden="true"></div>
+                </div>
               </div>
             </div>
           </div>
