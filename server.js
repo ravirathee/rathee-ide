@@ -36,16 +36,18 @@ const legacyOutputFilePath = path.join(workspaceDir, "output.txt");
 const templateCppPath = path.join(templatesDir, "Template.cpp");
 const headersPath = path.join(templatesDir, "Headers.hpp");
 const templatePythonPath = path.join(templatesDir, "Template.py");
+const templateJavaPath = path.join(templatesDir, "Template.java");
 const legacyTemplateCppPath = path.join(workspaceDir, "Template.cpp");
 const legacyHeadersPath = path.join(workspaceDir, "Headers.hpp");
 const legacyTemplatePythonPath = path.join(workspaceDir, "Template.py");
+const legacyTemplateJavaPath = path.join(workspaceDir, "Template.java");
 const appSettingsPath = path.join(workspaceDir, "AppSettings.json");
 const port = Number(process.env.PORT || 4173);
 const maxBodyBytes = 1024 * 1024;
 const runTimeoutMs = 8000;
 
 // ---------------------------------------------------------------------------
-// Execution sandbox. When USE_DOCKER=1, every g++/python3/lldb invocation runs
+// Execution sandbox. When USE_DOCKER=1, every g++/python3/javac/java/lldb invocation runs
 // inside a disposable, locked-down container instead of on the host, so it is
 // safe to expose publicly. Locally (flag off) everything runs natively for
 // fast iteration. The per-run temp dir is bind-mounted at /work; host paths
@@ -272,7 +274,7 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === "PUT" && url.pathname === "/api/me/template") {
         const b = await readJsonBody(req);
-        const valid = ["cpp_template", "headers", "python_template"];
+        const valid = ["cpp_template", "headers", "python_template", "java_template"];
         if (!b || !valid.includes(b.kind)) return sendJson(res, 400, { error: "invalid template kind" });
         await saveTemplate(uid, b.kind, b.content || "");
         return sendJson(res, 200, { ok: true });
@@ -367,11 +369,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/template-files") {
-      const { template, headers, python } = await readTemplateBundle();
+      const { template, headers, python, java } = await readTemplateBundle();
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      return sendJson(res, 200, { template, headers, python });
+      return sendJson(res, 200, { template, headers, python, java });
     }
 
     if (req.method === "POST" && url.pathname === "/api/template-files") {
@@ -380,7 +382,8 @@ const server = http.createServer(async (req, res) => {
       await Promise.all([
         writeFile(templateCppPath, String(body.template ?? ""), "utf8"),
         writeFile(headersPath, String(body.headers ?? ""), "utf8"),
-        writeFile(templatePythonPath, String(body.python ?? ""), "utf8")
+        writeFile(templatePythonPath, String(body.python ?? ""), "utf8"),
+        writeFile(templateJavaPath, String(body.java ?? ""), "utf8")
       ]);
       return sendJson(res, 200, { ok: true });
     }
@@ -392,8 +395,8 @@ const server = http.createServer(async (req, res) => {
       // Per-user model: don't write shared workspace/contests folders. Hand the
       // fetched problems + starter templates back; the client persists them
       // per-account (MySQL when signed in) or keeps them in memory (anonymous).
-      const selectedLanguage = body.language === "python" ? "python" : "cpp";
-      const starter = selectedLanguage === "python" ? (templates.python || "") : (templates.template || "");
+      const selectedLanguage = normalizeLanguage(body.language);
+      const starter = templateForLanguage(templates, selectedLanguage);
       for (const problem of result.problems || []) {
         if (problem.code == null || problem.code === "") problem.code = starter;
       }
@@ -405,8 +408,8 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await fetchCodeforcesImport(body.url);
       const templates = await readTemplateBundle();
-      const selectedLanguage = body.language === "python" ? "python" : "cpp";
-      const starter = selectedLanguage === "python" ? (templates.python || "") : (templates.template || "");
+      const selectedLanguage = normalizeLanguage(body.language);
+      const starter = templateForLanguage(templates, selectedLanguage);
       for (const problem of result.problems || []) {
         if (problem.code == null || problem.code === "") problem.code = starter;
       }
@@ -489,17 +492,28 @@ async function readJsonIfExists(filePath) {
 }
 
 async function readTemplateBundle() {
-  const [template, headers, python] = await Promise.all([
+  const [template, headers, python, java] = await Promise.all([
     readTextWithFallback(templateCppPath, legacyTemplateCppPath),
     readTextWithFallback(headersPath, legacyHeadersPath),
-    readTextWithFallback(templatePythonPath, legacyTemplatePythonPath)
+    readTextWithFallback(templatePythonPath, legacyTemplatePythonPath),
+    readTextWithFallback(templateJavaPath, legacyTemplateJavaPath)
   ]);
-  return { template, headers, python };
+  return { template, headers, python, java };
 }
 
 async function readTextWithFallback(primaryPath, fallbackPath) {
   const primary = await readTextIfExists(primaryPath);
   return primary || readTextIfExists(fallbackPath);
+}
+
+function normalizeLanguage(value) {
+  return ["cpp", "python", "java"].includes(value) ? value : "cpp";
+}
+
+function templateForLanguage(templates, language) {
+  if (language === "python") return templates.python || "";
+  if (language === "java") return templates.java || "";
+  return templates.template || "";
 }
 
 // Pull the problem index (A, B, F1, ...) out of a Codeforces problem URL.
@@ -898,13 +912,13 @@ function extractContestId(contestUrl) {
 }
 
 async function executeCode({ language, code, input = "", mode = "run", breakpoints = [] }) {
-  if (!["python", "cpp"].includes(language)) {
+  if (!["python", "cpp", "java"].includes(language)) {
     throw new Error("Unsupported language.");
   }
 
-  const extension = language === "python" ? "py" : "cpp";
+  const extension = language === "python" ? "py" : language === "java" ? "java" : "cpp";
   const runDir = await createRunDir("rathee-ide-run-");
-  const source = path.join(runDir, `main.${extension}`);
+  const source = path.join(runDir, language === "java" ? "Main.java" : `main.${extension}`);
   const inputFile = inputFilePath;
   const outputFile = outputFilePath;
   try {
@@ -923,6 +937,15 @@ async function executeCode({ language, code, input = "", mode = "run", breakpoin
 
     if (language === "python") {
       run = await runProcess("python3", [source], { input, cwd: runDir, timeoutMs: runTimeoutMs });
+    } else if (language === "java") {
+      compile = await runProcess("javac", [source], { cwd: runDir, timeoutMs: runTimeoutMs });
+
+      if (compile.code !== 0 || compile.timedOut) {
+        await writeFile(outputFile, "", "utf8");
+        return formatResult({ language, mode, startedAt, compile, run: null, output: "" });
+      }
+
+      run = await runProcess("java", ["-cp", runDir, "Main"], { input, cwd: runDir, timeoutMs: runTimeoutMs });
     } else {
       const binary = path.join(runDir, "main.out");
       compile = await runProcess("g++", [
@@ -992,6 +1015,9 @@ let debugSessionSeq = 0;
 const debugIdleMs = 5 * 60 * 1000;
 
 async function startDebugSession({ language = "cpp", code, input = "", breakpoints = [], clientId = "" }) {
+  if (language === "java") {
+    return { state: "error", message: "Java debugging is not supported yet. Use Run for Java files." };
+  }
   // End only this client's own previous session (so concurrent users don't
   // kill each other). With no clientId we fall back to the old single-session
   // behaviour. A global cap bounds total live sessions.

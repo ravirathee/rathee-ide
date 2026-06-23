@@ -18,7 +18,7 @@ setup without re-discovering it.
   Tunnel** (no port-forwarding, no public IP needed).
 - **The app:** plain Node (`node server.js`) listening on `127.0.0.1:4173`,
   managed by **launchd** (auto-start at boot, auto-restart on crash).
-- **Code sandbox:** g++/python3/lldb run inside Docker via **Colima**
+- **Code sandbox:** g++/python3/javac/java/lldb run inside Docker via **Colima**
   (image `forge-runner`).
 - **DB:** MySQL via Homebrew, database `rathee_ide`.
 - **Deploy:** SSH into the prod Mac and run `bash ~/deploy.sh` (git pull → maybe
@@ -162,7 +162,7 @@ locked-down container (see `sandbox()` in `server.js`). Docker is provided by
 - VM: macOS Virtualization.Framework, arch `x86_64`, runtime docker, mount `virtiofs`.
 - Docker socket: `~/.colima/default/docker.sock` (matches `DOCKER_HOST` above).
 - Sandbox image: **`forge-runner:latest`** built from this repo's `Dockerfile`
-  (Ubuntu 24.04 + g++ + python3 + lldb). ~878 MB.
+  (Ubuntu 24.04 + g++ + python3 + OpenJDK + lldb).
 
 Build / rebuild the runner image:
 

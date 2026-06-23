@@ -18,7 +18,7 @@ let pool = null;
 let ready = false;
 
 // Idempotent schema — created on startup. Code files live as rows (content as
-// text), tagged cpp/python, isolated per user. Codeforces problem data is NOT
+// text), tagged cpp/python/java, isolated per user. Codeforces problem data is NOT
 // stored (fetched live); we keep only the user's contest numbers + their code.
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -33,7 +33,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS files (
      id BIGINT AUTO_INCREMENT PRIMARY KEY,
      user_id BIGINT NOT NULL,
-     language ENUM('cpp','python') NOT NULL,
+     language ENUM('cpp','python','java') NOT NULL,
      scope ENUM('scratch','contest','folder') NOT NULL DEFAULT 'scratch',
      contest_id VARCHAR(64) NOT NULL DEFAULT '',
      filename VARCHAR(255) NOT NULL,
@@ -56,7 +56,7 @@ const SCHEMA = [
      user_id BIGINT NOT NULL,
      contest_id VARCHAR(32) NOT NULL,
      name VARCHAR(255),
-     language ENUM('cpp','python') NOT NULL DEFAULT 'cpp',
+     language ENUM('cpp','python','java') NOT NULL DEFAULT 'cpp',
      problems JSON,
      added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      PRIMARY KEY (user_id, contest_id),
@@ -70,7 +70,7 @@ const SCHEMA = [
    ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS templates (
      user_id BIGINT NOT NULL,
-     kind ENUM('cpp_template','headers','python_template') NOT NULL,
+     kind ENUM('cpp_template','headers','python_template','java_template') NOT NULL,
      content LONGTEXT,
      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
      PRIMARY KEY (user_id, kind),
@@ -121,6 +121,9 @@ async function applyMigrations() {
   await ensureColumn("user_contests", "problems", "JSON");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
+  await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
+  await pool.query(`ALTER TABLE user_contests MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL DEFAULT 'cpp'`).catch(() => {});
+  await pool.query(`ALTER TABLE templates MODIFY COLUMN kind ENUM('cpp_template','headers','python_template','java_template') NOT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE files MODIFY COLUMN scope ENUM('scratch','contest','folder') NOT NULL DEFAULT 'scratch'`).catch(() => {});
   await pool.query(`ALTER TABLE files MODIFY COLUMN contest_id VARCHAR(64) NOT NULL DEFAULT ''`).catch(() => {});
 }
