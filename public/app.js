@@ -3863,36 +3863,71 @@ function createFileInFolder(folder) {
   });
 }
 
+// Deleting a folder removes ONLY the currently-selected language's files from it
+// (folders are shared across languages — deleting in Java must not wipe C++
+// files). The folder itself is removed only when no language has files left.
 async function deleteFolder(folder) {
   const fid = String(folder.folderId || "");
+  if (!fid) return;
+  const language = currentLanguageValue();
+  const config = LANGUAGE_CONFIG[language];
   const wasOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
-  if (isAuthed() && fid) {
+
+  // Use the live file lists when this folder is open; otherwise the cached set.
+  if (wasOpen) folder.files = { cpp: cppFileNames.slice(), python: pyFileNames.slice(), java: javaFileNames.slice() };
+  const filesByLang = folder.files || { cpp: [], python: [], java: [] };
+  const fullyRemove = !SUPPORTED_LANGUAGES.some((l) => l !== language && (filesByLang[l] || []).length > 0);
+
+  if (isAuthed()) {
     await fetch("/api/me/folder", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId: fid })
+      body: JSON.stringify({ folderId: fid, language })
     }).catch(() => {});
   }
-  contextSnapshots.delete(`folder:${fid}`);
-  savedFolders = savedFolders.filter((f) => String(f.folderId) !== fid);
-  expandedFolderKeys.delete(fid);
-  if (wasOpen) {
-    codeFileScope = "workspace";
-    activeFolderId = "";
-    if (isAuthed()) {
-      await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles(), loadWorkspaceJavaFiles()]).catch(() => {});
-    } else if (!restoreContext("workspace")) {
-      cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; openCppTabs = [];
-      pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; openPyTabs = [];
-      javaFileNames = []; javaFiles = {}; javaInputs = {}; javaTabLabels = {}; javaProblems = {}; activeJavaFile = ""; openJavaTabs = [];
-      renderCurrentContext();
-    } else {
-      renderCurrentContext();
+
+  if (fullyRemove) {
+    contextSnapshots.delete(`folder:${fid}`);
+    savedFolders = savedFolders.filter((f) => String(f.folderId) !== fid);
+    expandedFolderKeys.delete(fid);
+    if (wasOpen) {
+      codeFileScope = "workspace";
+      activeFolderId = "";
+      if (isAuthed()) {
+        await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles(), loadWorkspaceJavaFiles()]).catch(() => {});
+      } else if (!restoreContext("workspace")) {
+        cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; openCppTabs = [];
+        pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; openPyTabs = [];
+        javaFileNames = []; javaFiles = {}; javaInputs = {}; javaTabLabels = {}; javaProblems = {}; activeJavaFile = ""; openJavaTabs = [];
+        renderCurrentContext();
+      } else {
+        renderCurrentContext();
+      }
     }
+    renderFolders();
+    setStatus("Folder deleted", "idle");
+    els.meta.textContent = `${folder.name} deleted`;
+    return;
+  }
+
+  // Scoped delete: clear only the current language's files for this folder.
+  folder.files[language] = [];
+  const snap = contextSnapshots.get(`folder:${fid}`);
+  if (snap) snap[language] = { names: [], files: {}, inputs: {}, labels: {}, problems: {}, active: "", open: [] };
+  if (wasOpen) {
+    const state = languageState(language);
+    state.setNames([]);
+    state.setActive("");
+    state.setOpenTabs([]);
+    [state.files, state.inputs, state.labels, state.problems].forEach((map) => {
+      Object.keys(map).forEach((key) => delete map[key]);
+    });
+    editorView = "code";
+    renderCurrentContext();
   }
   renderFolders();
-  setStatus("Folder deleted", "idle");
-  els.meta.textContent = `${folder.name} deleted`;
+  setStatus("Files deleted", "idle");
+  els.meta.textContent = `${config.label} files in ${folder.name} deleted`;
 }
 
 // Inline-rename a folder name in the header (Enter / blur commits, Esc cancels).
@@ -4120,7 +4155,7 @@ function renderFolders() {
     const delBtn = document.createElement("button");
     delBtn.type = "button";
     delBtn.className = "temp-file-action temp-file-delete";
-    delBtn.title = `Delete ${folder.name}`;
+    delBtn.title = `Delete ${LANGUAGE_CONFIG[currentLanguageValue()]?.label || "C++"} files in ${folder.name}`;
     delBtn.innerHTML = ICON_DELETE;
     delBtn.addEventListener("click", (event) => { event.stopPropagation(); deleteFolder(folder); });
     actions.append(importBtn, renameBtn, delBtn);
