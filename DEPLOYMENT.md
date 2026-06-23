@@ -312,5 +312,5 @@ Common failure modes:
 
 ---
 
-*Last verified live on the prod Mac: 2026-06-23. Prod was at commit `2f83371`;
+*Last verified live on the prod Mac: 2026-06-23. Prod was at commit `06d7766`;
 run `deploy.sh` to advance it to the latest `main`.*
