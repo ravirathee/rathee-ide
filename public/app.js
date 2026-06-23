@@ -3468,7 +3468,7 @@ async function loadSavedContest(contest, targetProblemIndex = "") {
     const ext = LANGUAGE_CONFIG[currentLanguageValue()]?.extension || ".cpp";
     if (codeFileScope === "contest" && String(activeContestId) === cid) {
       const fn = targetProblemIndex ? `${targetProblemIndex}${ext}` : "";
-      if (fn && currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+      if (fn && currentFileNames().includes(fn) && (currentActiveFile() !== fn || editorView !== "code")) switchCodeFile(fn);
       return;
     }
     stashCurrentContext();
@@ -3530,7 +3530,7 @@ async function openAccountContest(contest, targetProblemIndex = "") {
     if (targetProblemIndex) {
       const ext = LANGUAGE_CONFIG[els.language.value]?.extension || ".cpp";
       const fn = `${targetProblemIndex}${ext}`;
-      if (currentFileNames().includes(fn) && currentActiveFile() !== fn) switchCodeFile(fn);
+      if (currentFileNames().includes(fn) && (currentActiveFile() !== fn || editorView !== "code")) switchCodeFile(fn);
     }
   } catch (error) {
     setDebuggerOutput(error.message);
@@ -3836,7 +3836,9 @@ async function openFolder(folder, targetFile = "") {
   const fid = String(folder.folderId || "");
   if (!fid) return;
   if (codeFileScope === "folder" && String(activeFolderId) === fid) {
-    if (targetFile && currentFileNames().includes(targetFile) && currentActiveFile() !== targetFile) switchCodeFile(targetFile);
+    // Switch back even when targetFile is already the active file but a template
+    // view is showing — otherwise clicking the (only) problem does nothing.
+    if (targetFile && currentFileNames().includes(targetFile) && (currentActiveFile() !== targetFile || editorView !== "code")) switchCodeFile(targetFile);
     return;
   }
   stashCurrentContext();
