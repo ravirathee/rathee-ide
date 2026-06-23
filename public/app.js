@@ -825,6 +825,16 @@ function renderAutoCompletionCategoryTabs() {
     tab.classList.toggle("active", isActive);
     tab.classList.toggle("is-paused", Boolean(currentAutoCompletionDisabledTabs()[category.id]));
     tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    if (!category.builtin) {
+      tab.classList.add("has-delete");
+      const del = document.createElement("span");
+      del.className = "autocomplete-category-tab-delete";
+      del.dataset.deleteCategory = category.id;
+      del.title = `Delete ${category.label} tab`;
+      del.setAttribute("aria-label", `Delete ${category.label} tab`);
+      del.textContent = "×";
+      tab.append(del);
+    }
     els.autoCompletionCategoryTabs.append(tab);
   });
   const add = document.createElement("button");
@@ -878,6 +888,58 @@ function createAutoCompletionCustomTab() {
   autoCompletion = normalizeAutoCompletionSettings({ ...autoCompletion, tabs, languageCategories, disabledTabs });
   activeAutoCompletionCategory = id;
   localStorage.setItem("rathee.autoCompletionCategory", id);
+  renderAutoCompletionSettings();
+  markAutoCompletionDirty();
+}
+
+function deleteAutoCompletionCustomTab(category) {
+  const tab = (autoCompletion.tabs || []).find((entry) => entry.id === category);
+  if (!tab || tab.builtin) return;
+  const languages = ["cpp", "python", "java"];
+  const triggersByLanguage = {};
+  let totalRules = 0;
+  languages.forEach((language) => {
+    const triggers = (autoCompletion.languageCategories?.[language] || {})[category] || [];
+    triggersByLanguage[language] = triggers;
+    totalRules += triggers.length;
+  });
+  const message = totalRules > 0
+    ? `Delete tab "${tab.label}" and its ${totalRules} rule${totalRules === 1 ? "" : "s"}?`
+    : `Delete tab "${tab.label}"?`;
+  if (!window.confirm(message)) return;
+
+  const currentLanguage = currentAutoCompletionLanguage();
+  const languageRules = {};
+  const languageCategories = {};
+  const disabledTabs = {};
+  languages.forEach((language) => {
+    const rules = { ...(autoCompletion.languageRules?.[language] || {}) };
+    const categories = { ...(autoCompletion.languageCategories?.[language] || {}) };
+    triggersByLanguage[language].forEach((trigger) => {
+      delete rules[trigger];
+      if (language === currentLanguage) autoCompletionDeletedTriggers.add(trigger);
+    });
+    delete categories[category];
+    languageRules[language] = rules;
+    languageCategories[language] = categories;
+    const disabled = { ...(autoCompletion.disabledTabs?.[language] || {}) };
+    delete disabled[category];
+    disabledTabs[language] = disabled;
+  });
+  const tabs = (autoCompletion.tabs || []).filter((entry) => entry.id !== category);
+  autoCompletion = normalizeAutoCompletionSettings({
+    ...autoCompletion,
+    tabs,
+    languageRules,
+    languageCategories,
+    categories: languageCategories.cpp,
+    rules: languageRules.cpp,
+    disabledTabs
+  });
+  if (activeAutoCompletionCategory === category) {
+    activeAutoCompletionCategory = autoCompletion.tabs[0]?.id || "initialisation";
+    localStorage.setItem("rathee.autoCompletionCategory", activeAutoCompletionCategory);
+  }
   renderAutoCompletionSettings();
   markAutoCompletionDirty();
 }
@@ -1413,6 +1475,11 @@ function boot() {
   els.autoCompletionPairs?.addEventListener("change", () => setAutoCompletionPairs(els.autoCompletionPairs.checked));
   els.autoCompletionPlaceholder?.addEventListener("change", () => setAutoCompletionPlaceholder(els.autoCompletionPlaceholder.value));
   els.autoCompletionCategoryTabs?.addEventListener("click", (event) => {
+    const del = event.target.closest?.(".autocomplete-category-tab-delete");
+    if (del) {
+      deleteAutoCompletionCustomTab(del.dataset.deleteCategory);
+      return;
+    }
     const tab = event.target.closest?.(".autocomplete-category-tab");
     if (!tab) return;
     if (tab.classList.contains("autocomplete-category-add")) {
@@ -1471,7 +1538,7 @@ function boot() {
   els.hideOutputBtn.addEventListener("click", () => togglePanel("output"));
   els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
   els.copyOutputBtn.addEventListener("click", () => copyPaneText(els.output.value, els.copyOutputBtn));
-  els.copyCodeBtn.addEventListener("click", () => copyPaneText(getEditorCode(), els.copyCodeBtn));
+  els.copyCodeBtn.addEventListener("click", () => copyPaneText(getCopyCode(), els.copyCodeBtn));
   els.copyDebugBtn.addEventListener("click", () => copyPaneText(combinedDebugText(), els.copyDebugBtn));
   els.hideDebugBtn.addEventListener("click", toggleDebugPanel);
   els.revealIoBtn.addEventListener("click", revealInputOutput);
@@ -3672,6 +3739,17 @@ function nextFolderName() {
 }
 
 // Build the live file arrays for all languages from a stored map and make it the active set.
+// Imported problem files are named `<contestId><index>` (e.g. 1700A.cpp), with a
+// possible `_2` uniqueness suffix. The server stores only code/input, not the CF
+// identity, so recover {contestId, index} from the filename when reloading a
+// folder — otherwise Submit/Status can't tell which problem the tab belongs to.
+function deriveProblemFromFilename(filename) {
+  const base = String(filename || "").replace(/\.[^.]+$/, "").replace(/_\d+$/, "");
+  const match = base.match(/^(\d+)([A-Za-z]\d*)$/);
+  if (!match) return null;
+  return { contestId: match[1], index: match[2].toUpperCase() };
+}
+
 function setArraysFromStored(stored) {
   const build = (lang) => {
     const saved = (stored && stored[lang]) || {};
@@ -3681,7 +3759,7 @@ function setArraysFromStored(stored) {
       files: Object.fromEntries(names.map((n) => [n, saved[n].content || ""])),
       inputs: Object.fromEntries(names.map((n) => [n, saved[n].input || ""])),
       labels: Object.fromEntries(names.map((n) => [n, n])),
-      problems: Object.fromEntries(names.map((n) => [n, null]))
+      problems: Object.fromEntries(names.map((n) => [n, deriveProblemFromFilename(n)]))
     };
   };
   const c = build("cpp");
@@ -5076,6 +5154,16 @@ async function copyPaneText(text, button) {
   } catch {
     els.meta.textContent = "Clipboard permission was blocked.";
   }
+}
+
+// Copy-button source: for a C++ problem file, prepend Headers.hpp (deduped) so
+// the clipboard matches what actually runs/submits. Python/Java and the
+// template/headers editor views are copied verbatim.
+function getCopyCode() {
+  if (els.language.value === "cpp" && editorView === "code") {
+    return combineCppSource(getEditorCode());
+  }
+  return getEditorCode();
 }
 
 function getSubmitCode() {

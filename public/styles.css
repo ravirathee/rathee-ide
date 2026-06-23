@@ -1974,6 +1974,11 @@ textarea,
   overflow: hidden;
   border-top: 1px solid var(--line);
   background: var(--panel-2);
+  /* The editor's `zoom` counter-scale (see .CodeMirror) creates a stacking
+     context that would otherwise paint the editor above this panel — making it
+     look see-through and swallow clicks. Establish our own context above it. */
+  position: relative;
+  z-index: 1;
 }
 
 .editor-debug-panel > .pane-head {
@@ -2452,6 +2457,31 @@ textarea,
 .autocomplete-category-tab.is-paused {
   color: var(--muted);
   opacity: 0.62;
+}
+
+.autocomplete-category-tab.has-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.autocomplete-category-tab-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.autocomplete-category-tab-delete:hover {
+  color: #fff;
+  background: var(--danger, #e5484d);
+  opacity: 1;
 }
 
 .autocomplete-category-add {
