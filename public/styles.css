@@ -439,6 +439,16 @@ select {
   outline: 0;
 }
 
+/* The native dropdown popup (Windows/Chrome especially) ignores the select's
+   transparent background and falls back to a system-white list — leaving white
+   option text unreadable in dark mode. Give options an explicit opaque surface
+   and text color so the popup is legible in every mode. */
+select option,
+select optgroup {
+  background-color: var(--panel-solid);
+  color: var(--text);
+}
+
 input {
   min-width: 0;
   width: 100%;
@@ -1973,10 +1983,13 @@ textarea,
   min-height: 0;
   overflow: hidden;
   border-top: 1px solid var(--line);
-  background: var(--panel-2);
-  /* The editor's `zoom` counter-scale (see .CodeMirror) creates a stacking
-     context that would otherwise paint the editor above this panel — making it
-     look see-through and swallow clicks. Establish our own context above it. */
+  /* Opaque so the editor (which overflows behind this row, see .CodeMirror's
+     zoom counter-scale) never shows through the panel or the gaps between
+     buttons. */
+  background: var(--panel-solid);
+  /* The editor's `zoom` counter-scale creates a stacking context that would
+     otherwise paint the editor above this panel — making it look see-through
+     and swallow clicks. Establish our own context above it. */
   position: relative;
   z-index: 1;
 }
@@ -2002,7 +2015,10 @@ textarea,
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
-  background: var(--panel);
+  /* Opaque base: the editor overflows behind this panel, so a translucent
+     button would show it through. Tinted states layer their tint over an
+     opaque surface (linear-gradient + --panel-solid) to stay non-see-through. */
+  background: var(--panel-solid);
   font-family: var(--mono);
   font-size: 0.7rem;
   cursor: pointer;
@@ -2022,7 +2038,7 @@ textarea,
 .debug-control:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.6);
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.1);
+  background: linear-gradient(rgba(var(--accent-rgb), 0.1), rgba(var(--accent-rgb), 0.1)), var(--panel-solid);
 }
 
 .debug-control:disabled {
@@ -2033,13 +2049,13 @@ textarea,
 .debug-control-primary {
   border-color: rgba(var(--accent-rgb), 0.6);
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.12);
+  background: linear-gradient(rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.12)), var(--panel-solid);
 }
 
 .debug-control-stop:hover:not(:disabled) {
   border-color: rgba(239, 83, 80, 0.7);
   color: #ef5350;
-  background: rgba(239, 83, 80, 0.12);
+  background: linear-gradient(rgba(239, 83, 80, 0.12), rgba(239, 83, 80, 0.12)), var(--panel-solid);
 }
 
 .debug-status {
