@@ -31,7 +31,7 @@
   --editor-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   /* layout sizes driven by JS */
-  --side-width: 28%;
+  --side-width: 22%;
   --input-height: 45%;
   --danger: #f56565;
   --danger-rgb: 245, 101, 101;

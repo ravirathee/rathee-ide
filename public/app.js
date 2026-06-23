@@ -228,7 +228,7 @@ let layoutState = {
   codeSide: localStorage.getItem("rathee.codeSide") || "left",
   showInput: localStorage.getItem("rathee.showInput") !== "false",
   showOutput: localStorage.getItem("rathee.showOutput") !== "false",
-  sideWidth: Number(localStorage.getItem("rathee.sideWidth") || 28),
+  sideWidth: Number(localStorage.getItem("rathee.sideWidth") || 22),
   inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45),
   showDebug: localStorage.getItem("rathee.showDebug") === "true",
   debugHeight: Number(localStorage.getItem("rathee.debugHeight") || 28),
