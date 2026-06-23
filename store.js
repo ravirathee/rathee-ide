@@ -48,6 +48,7 @@ const SCHEMA = [
      user_id BIGINT NOT NULL,
      folder_id VARCHAR(64) NOT NULL,
      name VARCHAR(255),
+     problems JSON,
      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      PRIMARY KEY (user_id, folder_id),
      CONSTRAINT fk_uf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -119,6 +120,8 @@ export async function initStore() {
 // won't alter an existing table, so guard each ADD COLUMN on information_schema.
 async function applyMigrations() {
   await ensureColumn("user_contests", "problems", "JSON");
+  // Folders persist the imported problems' names so labels survive a reload.
+  await ensureColumn("user_folders", "problems", "JSON");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
   await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
@@ -216,18 +219,23 @@ export async function removeContest(userId, contestId) {
 // ---- Folders (per user; user-created containers of code files) ----
 export async function listFolders(userId) {
   const [rows] = await pool.query(
-    `SELECT folder_id, name, created_at FROM user_folders WHERE user_id = ? ORDER BY created_at ASC`,
+    `SELECT folder_id, name, problems, created_at FROM user_folders WHERE user_id = ? ORDER BY created_at ASC`,
     [userId]
   );
-  return rows;
+  return rows.map((r) => ({
+    ...r,
+    problems: typeof r.problems === "string" ? JSON.parse(r.problems || "[]") : (r.problems || [])
+  }));
 }
 
-export async function addFolder(userId, { folderId, name = null }) {
+// `name` and `problems` are updated only when provided (COALESCE), so a rename
+// doesn't wipe the stored problems and an import doesn't wipe the name.
+export async function addFolder(userId, { folderId, name = null, problems = null }) {
   await pool.query(
-    `INSERT INTO user_folders (user_id, folder_id, name)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE name = VALUES(name)`,
-    [userId, String(folderId), name]
+    `INSERT INTO user_folders (user_id, folder_id, name, problems)
+     VALUES (?, ?, ?, CAST(? AS JSON))
+     ON DUPLICATE KEY UPDATE name = COALESCE(VALUES(name), name), problems = COALESCE(VALUES(problems), problems)`,
+    [userId, String(folderId), name, problems === null ? null : JSON.stringify(problems)]
   );
 }
 

@@ -247,7 +247,7 @@ const server = http.createServer(async (req, res) => {
             contestId: c.contest_id, name: c.name, language: c.language,
             problems: c.problems || [], savedAt: c.added_at
           })),
-          folders: folders.map((f) => ({ folderId: f.folder_id, name: f.name, createdAt: f.created_at })),
+          folders: folders.map((f) => ({ folderId: f.folder_id, name: f.name, problems: f.problems || [], createdAt: f.created_at })),
           settings,
           templates
         });

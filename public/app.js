@@ -3264,6 +3264,7 @@ async function loadSavedContestList() {
     savedFolders = (data.folders || []).map((f) => ({
       folderId: String(f.folderId),
       name: f.name || "Folder",
+      problems: Array.isArray(f.problems) ? f.problems : [],
       files: filesByFolder[String(f.folderId)] || { cpp: [], python: [], java: [] }
     }));
     renderSavedContests();
@@ -3750,15 +3751,31 @@ function deriveProblemFromFilename(filename) {
   return { contestId: match[1], index: match[2].toUpperCase() };
 }
 
-function setArraysFromStored(stored) {
+// Look up a folder file's Codeforces problem name from the folder's persisted
+// problem list (matched by contestId+index derived from the filename), so the
+// "<file> - <name>" tab label survives a reload.
+function folderProblemNameFor(filename, problemList) {
+  const derived = deriveProblemFromFilename(filename);
+  if (!derived || !Array.isArray(problemList)) return "";
+  const match = problemList.find((p) =>
+    String(p.contestId) === String(derived.contestId) &&
+    String(p.index).toUpperCase() === derived.index);
+  return match?.name || "";
+}
+
+function setArraysFromStored(stored, problemList = []) {
   const build = (lang) => {
     const saved = (stored && stored[lang]) || {};
     const names = Object.keys(saved).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    const labelFor = (n) => {
+      const name = folderProblemNameFor(n, problemList);
+      return name ? `${n} - ${name}` : n;
+    };
     return {
       names,
       files: Object.fromEntries(names.map((n) => [n, saved[n].content || ""])),
       inputs: Object.fromEntries(names.map((n) => [n, saved[n].input || ""])),
-      labels: Object.fromEntries(names.map((n) => [n, n])),
+      labels: Object.fromEntries(names.map((n) => [n, labelFor(n)])),
       problems: Object.fromEntries(names.map((n) => [n, deriveProblemFromFilename(n)]))
     };
   };
@@ -3799,7 +3816,7 @@ function syncActiveFolderCache() {
 async function createFolder() {
   const folderId = generateFolderId();
   const name = nextFolderName();
-  savedFolders.push({ folderId, name, files: { cpp: [], python: [], java: [] } });
+  savedFolders.push({ folderId, name, problems: [], files: { cpp: [], python: [], java: [] } });
   expandedFolderKeys.add(folderId);
   if (isAuthed()) {
     await fetch("/api/me/folder", {
@@ -3828,7 +3845,8 @@ async function openFolder(folder, targetFile = "") {
   activeContestId = "";
   activeContestDir = "";
   if (!restoreContext(`folder:${fid}`)) {
-    setArraysFromStored(await fetchFolderFiles(fid));
+    const folderProblems = savedFolders.find((f) => String(f.folderId) === fid)?.problems || [];
+    setArraysFromStored(await fetchFolderFiles(fid), folderProblems);
   }
   const names = currentFileNames();
   const target = targetFile && names.includes(targetFile) ? targetFile : (currentActiveFile() && names.includes(currentActiveFile()) ? currentActiveFile() : names[0] || "");
@@ -4023,6 +4041,7 @@ async function importIntoFolder(folder, rawUrl) {
       languageState().setActive("");
       switchCodeFile(firstName);
     }
+    persistFolderProblems(folder, list);
     refreshDrawerAndTabs();
     setStatus("Imported", "success");
     els.meta.textContent = list.length === 1
@@ -4033,6 +4052,26 @@ async function importIntoFolder(folder, rawUrl) {
     els.meta.textContent = error.message || "Codeforces import failed";
     renderFolders();
   }
+}
+
+// Merge the just-imported problems into the folder's stored problem list (keyed
+// by contestId+index) and persist it, so the "<file> - <name>" labels can be
+// rebuilt after a reload. In-memory folder.problems is updated too.
+function persistFolderProblems(folder, imported) {
+  const merged = (folder.problems || []).slice();
+  const seen = new Set(merged.map((p) => `${p.contestId}|${String(p.index).toUpperCase()}`));
+  for (const p of imported) {
+    const entry = { contestId: String(p.contestId), index: String(p.index).toUpperCase(), name: p.name || "" };
+    const key = `${entry.contestId}|${entry.index}`;
+    if (!seen.has(key)) { merged.push(entry); seen.add(key); }
+  }
+  folder.problems = merged;
+  if (!isAuthed()) return;
+  fetch("/api/me/folder", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folderId: folder.folderId, problems: merged })
+  }).catch(() => {});
 }
 
 function renderFolders() {
