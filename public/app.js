@@ -204,6 +204,8 @@ let autoCompletion = normalizeAutoCompletionSettings(DEFAULT_AUTO_COMPLETION);
 let snippetSession = null;
 let autoCompletionDraftOpen = false;
 const breakpointsByFile = {};
+const DEFAULT_SIDE_WIDTH = 22;
+const LAYOUT_SETTINGS_VERSION = 2;
 // Stable per-browser id so the server scopes "stop my previous debug session"
 // to this client and doesn't disturb other users.
 const debugClientId = (() => {
@@ -214,6 +216,14 @@ const debugClientId = (() => {
   }
   return id;
 })();
+function initialSideWidth() {
+  const layoutVersion = Number(localStorage.getItem("rathee.layoutVersion") || 0);
+  if (layoutVersion >= LAYOUT_SETTINGS_VERSION) {
+    const saved = Number(localStorage.getItem("rathee.sideWidth"));
+    if (Number.isFinite(saved)) return saved;
+  }
+  return DEFAULT_SIDE_WIDTH;
+}
 let debugSession = {
   id: null,
   active: false,
@@ -228,7 +238,7 @@ let layoutState = {
   codeSide: localStorage.getItem("rathee.codeSide") || "left",
   showInput: localStorage.getItem("rathee.showInput") !== "false",
   showOutput: localStorage.getItem("rathee.showOutput") !== "false",
-  sideWidth: Number(localStorage.getItem("rathee.sideWidth") || 22),
+  sideWidth: initialSideWidth(),
   inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45),
   showDebug: localStorage.getItem("rathee.showDebug") === "true",
   debugHeight: Number(localStorage.getItem("rathee.debugHeight") || 28),
@@ -265,7 +275,11 @@ function applyAppSettings(settings) {
   if (["left", "right"].includes(layout.codeSide)) layoutState.codeSide = layout.codeSide;
   if (typeof layout.showInput === "boolean") layoutState.showInput = layout.showInput;
   if (typeof layout.showOutput === "boolean") layoutState.showOutput = layout.showOutput;
-  if (Number.isFinite(Number(layout.sideWidth))) layoutState.sideWidth = Number(layout.sideWidth);
+  if (Number.isFinite(Number(layout.sideWidth))) {
+    layoutState.sideWidth = Number(layout.layoutVersion || 0) >= LAYOUT_SETTINGS_VERSION
+      ? Number(layout.sideWidth)
+      : DEFAULT_SIDE_WIDTH;
+  }
   if (Number.isFinite(Number(layout.inputHeight))) layoutState.inputHeight = Number(layout.inputHeight);
   if (typeof layout.showDebug === "boolean") layoutState.showDebug = layout.showDebug;
   if (Number.isFinite(Number(layout.debugHeight))) layoutState.debugHeight = Number(layout.debugHeight);
@@ -286,6 +300,7 @@ function currentAppSettings() {
     },
     autoCompletion,
     layout: {
+      layoutVersion: LAYOUT_SETTINGS_VERSION,
       drawerWidth: layoutState.drawerWidth,
       codeSide: layoutState.codeSide,
       showInput: layoutState.showInput,
@@ -1613,6 +1628,7 @@ function applyWorkspaceLayout() {
   localStorage.setItem("rathee.drawerWidth", String(layoutState.drawerWidth));
   localStorage.setItem("rathee.showInput", String(layoutState.showInput));
   localStorage.setItem("rathee.showOutput", String(layoutState.showOutput));
+  localStorage.setItem("rathee.layoutVersion", String(LAYOUT_SETTINGS_VERSION));
   localStorage.setItem("rathee.sideWidth", String(layoutState.sideWidth));
   localStorage.setItem("rathee.inputHeight", String(layoutState.inputHeight));
   localStorage.setItem("rathee.showDebug", String(layoutState.showDebug));
