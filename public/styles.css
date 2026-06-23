@@ -1494,7 +1494,7 @@ body.resizing .resize-handle::after {
   flex: 0 0 164px;
 }
 
-/* size to content so the full selected language ("Python 3" / "C++17") shows */
+/* size to content so the full selected language ("Python 3" / "C++20") shows */
 .quick-language-setting {
   flex: 0 0 auto;
   grid-template-columns: auto auto;

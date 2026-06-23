@@ -421,7 +421,7 @@ const breakpointsByFile = {};
 const LANGUAGE_CONFIG = {
   cpp: {
     label: "C++",
-    optionLabel: "C++17",
+    optionLabel: "C++20",
     extension: ".cpp",
     defaultFile: "A.cpp",
     templateView: "template",
