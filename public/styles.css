@@ -836,10 +836,18 @@ button:disabled {
 
 .folder-header > .temp-file-actions {
   display: flex;
+  /* Lift above the folder's file list so the open sort menu overlays it and
+     stays clickable (the list is a later sibling and would otherwise cover it). */
+  z-index: 30;
+}
+
+/* Dim the action icons (not the whole row) so the dropdown menu, which lives
+   inside this row, isn't made translucent/unclickable by an opacity group. */
+.folder-header > .temp-file-actions .temp-file-action {
   opacity: 0.7;
 }
 
-.folder-header:hover > .temp-file-actions {
+.folder-header:hover > .temp-file-actions .temp-file-action {
   opacity: 1;
 }
 
@@ -891,6 +899,28 @@ button:disabled {
 .saved-contests-header .drawer-label {
   padding-right: 0;
 }
+
+.folder-header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.folder-sort-dropdown { padding-right: 2px; }
+
+.folder-header-actions .folder-file-sort-dropdown { padding-right: 0; }
+.folder-file-sort-btn svg { display: block; }
+
+/* Action icons packed tightly; revealed by the "<" toggle. */
+.folder-header-actions { gap: 0; }
+
+.folder-actions-toggle {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.folder-header > .temp-file-actions .folder-actions-toggle { opacity: 0.9; }
 
 .contest-sort-dropdown {
   position: relative;

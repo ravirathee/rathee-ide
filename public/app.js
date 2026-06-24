@@ -16,6 +16,10 @@ const els = {
   contestSortBtn: document.querySelector("#contestSortBtn"),
   contestSortMenu: document.querySelector("#contestSortMenu"),
   contestSortItems: Array.from(document.querySelectorAll(".contest-sort-item")),
+  folderSortDropdown: document.querySelector(".folder-sort-dropdown"),
+  folderSortBtn: document.querySelector("#folderSortBtn"),
+  folderSortMenu: document.querySelector("#folderSortMenu"),
+  folderSortItems: Array.from(document.querySelectorAll(".folder-sort-item")),
   language: document.querySelector("#language"),
   code: document.querySelector("#code"),
   editorDebugPanel: document.querySelector("#editorDebugPanel"),
@@ -167,6 +171,10 @@ let expandedFolderKeys = new Set((() => {
 function saveExpandedFolders() {
   localStorage.setItem("rathee.expandedFolders", JSON.stringify([...expandedFolderKeys]));
 }
+
+// Folders whose action icons (sort/import/rename/delete) are revealed via the
+// "<" toggle. Transient (resets on reload).
+let folderActionsOpen = new Set();
 let draggedFolderId = ""; // folder being drag-reordered in the drawer
 
 // Per-file Codeforces sample tests: { [filename]: [{ input, expected }] }, one
@@ -212,6 +220,16 @@ let contestSortMode = contestSortModes.includes(localStorage.getItem("rathee.con
   ? localStorage.getItem("rathee.contestSortMode")
   : "hosted";
 let expandedContestKeys = new Set();
+
+// Folder sort (alphabetical default) + per-folder file sort + file timestamps.
+const folderSortModes = ["alpha", "created", "edited"];
+let folderFileSort = (() => {
+  try { return JSON.parse(localStorage.getItem("rathee.folderFileSort") || "{}") || {}; } catch { return {}; }
+})();
+// { `${folderId}|${language}|${filename}`: { created: ms, updated: ms } }
+let folderFileMeta = {};
+const SORT_LABEL = { alpha: "Alphabetical", created: "Recently created", edited: "Recently edited" };
+
 let tempFilesExpanded = true; // Temporary Code Files start expanded on load
 let codeforcesHandle = localStorage.getItem("rathee.codeforcesHandle") || "mr_awesomeravi";
 let editorFontSize = Number(localStorage.getItem("forge.editorFontSize") || 15);
@@ -1486,6 +1504,13 @@ function boot() {
   els.contestSortItems.forEach((item) => {
     item.addEventListener("click", () => setContestSortMode(item.dataset.sortValue));
   });
+  els.folderSortBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleFolderSortMenu();
+  });
+  els.folderSortItems.forEach((item) => {
+    item.addEventListener("click", () => setFolderSortMode(item.dataset.sortValue));
+  });
   els.profileBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleProfileMenu();
@@ -1499,6 +1524,10 @@ function boot() {
     if (!els.themeMenu.hidden && !els.themeDropdown.contains(event.target)) toggleThemeMenu(false);
     if (!els.profileMenu.hidden && !els.profileDropdown.contains(event.target)) toggleProfileMenu(false);
     if (!els.contestSortMenu.hidden && !els.contestSortDropdown.contains(event.target)) toggleContestSortMenu(false);
+    if (els.folderSortMenu && !els.folderSortMenu.hidden && !els.folderSortDropdown.contains(event.target)) toggleFolderSortMenu(false);
+    if (!event.target.closest(".folder-file-sort-dropdown")) {
+      document.querySelectorAll(".folder-file-sort-dropdown .contest-sort-menu").forEach((mn) => { mn.hidden = true; });
+    }
   });
   els.editorFontSizeInput.addEventListener("input", () => setEditorFontSize(Number(els.editorFontSizeInput.value)));
   els.editorFontSelect.addEventListener("change", () => setEditorFontFamily(els.editorFontSelect.value));
@@ -2218,6 +2247,9 @@ function scheduleWorkspaceCodeSave() {
   if (!filename) return;
   clearTimeout(codeSaveTimer);
   const code = state.files[filename];
+  if (codeFileScope === "folder" && activeFolderId) {
+    touchFolderFile(activeFolderId, language, filename); // mark edited for the sort
+  }
   codeSaveTimer = setTimeout(() => {
     const save = saveFunctionFor(language);
     save(filename, code).catch(() => {
@@ -3334,18 +3366,29 @@ async function loadSavedContestList() {
       tempPyNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "python").map((f) => f.filename);
       tempJavaNames = (data.files || []).filter((f) => f.scope === "scratch" && f.language === "java").map((f) => f.filename);
     }
-    // Folders come from the same account fetch: group their files per language.
+    // Folders come from the same account fetch: group their files per language,
+    // and record per-file timestamps (for the create/edit sorts).
     const filesByFolder = {};
+    const lastEditedByFolder = {};
+    folderFileMeta = {};
     for (const f of data.files || []) {
       if (f.scope !== "folder") continue;
       const fid = String(f.contestId);
       const bucket = filesByFolder[fid] || (filesByFolder[fid] = { cpp: [], python: [], java: [] });
-      if (SUPPORTED_LANGUAGES.includes(f.language)) bucket[f.language].push(f.filename);
+      if (SUPPORTED_LANGUAGES.includes(f.language)) {
+        bucket[f.language].push(f.filename);
+        const created = f.createdAt ? Date.parse(f.createdAt) : 0;
+        const updated = f.updatedAt ? Date.parse(f.updatedAt) : 0;
+        folderFileMeta[folderMetaKey(fid, f.language, f.filename)] = { created, updated };
+        lastEditedByFolder[fid] = Math.max(lastEditedByFolder[fid] || 0, updated);
+      }
     }
     savedFolders = (data.folders || []).map((f) => ({
       folderId: String(f.folderId),
       name: f.name || "Folder",
       problems: Array.isArray(f.problems) ? f.problems : [],
+      createdAt: f.createdAt,
+      lastEdited: lastEditedByFolder[String(f.folderId)] || (f.createdAt ? Date.parse(f.createdAt) : 0),
       files: filesByFolder[String(f.folderId)] || { cpp: [], python: [], java: [] }
     }));
     renderSavedContests();
@@ -3919,7 +3962,11 @@ function syncActiveFolderCache() {
 async function createFolder() {
   const folderId = generateFolderId();
   const name = nextFolderName();
-  savedFolders.push({ folderId, name, problems: [], files: { cpp: [], python: [], java: [] } });
+  savedFolders.push({
+    folderId, name, problems: [],
+    createdAt: new Date().toISOString(), lastEdited: Date.now(),
+    files: { cpp: [], python: [], java: [] }
+  });
   expandedFolderKeys.add(folderId);
   saveExpandedFolders();
   if (isAuthed()) {
@@ -4146,6 +4193,7 @@ async function importIntoFolder(folder, rawUrl) {
         currentTestsMap(language)[name] = (p.samples && p.samples.length)
           ? p.samples.map((s) => ({ input: s.input || "", expected: s.output ?? "" }))
           : [{ input: input || "", expected: "" }];
+        touchFolderFile(folder.folderId, language, name, { created: true });
       }
       if (!firstName) firstName = created[currentLanguageValue()] || created.cpp;
     }
@@ -4189,6 +4237,67 @@ function persistFolderProblems(folder, imported) {
   }).catch(() => {});
 }
 
+function folderMetaKey(folderId, language, filename) {
+  return `${folderId}|${language}|${filename}`;
+}
+
+function getFileMeta(folderId, language, filename) {
+  return folderFileMeta[folderMetaKey(folderId, language, filename)] || null;
+}
+
+// Stamp a folder file as just created/edited so the sorts reflect it immediately,
+// without waiting for the next account fetch.
+function touchFolderFile(folderId, language, filename, { created = false } = {}) {
+  const key = folderMetaKey(folderId, language, filename);
+  const now = Date.now();
+  const meta = folderFileMeta[key] || (folderFileMeta[key] = { created: now, updated: now });
+  if (created) meta.created = now;
+  meta.updated = now;
+  const folder = savedFolders.find((f) => String(f.folderId) === String(folderId));
+  if (folder) folder.lastEdited = now;
+}
+
+function folderFileSortMode(folderId) {
+  return folderSortModes.includes(folderFileSort[folderId]) ? folderFileSort[folderId] : "alpha";
+}
+
+function setFolderFileSort(folderId, mode) {
+  if (!folderSortModes.includes(mode)) return;
+  folderFileSort[folderId] = mode;
+  localStorage.setItem("rathee.folderFileSort", JSON.stringify(folderFileSort));
+  renderFolders();
+}
+
+function sortFolderFiles(folderId, language, names) {
+  const mode = folderFileSortMode(folderId);
+  const arr = names.slice();
+  const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  if (mode === "alpha") return arr.sort(byName);
+  const field = mode === "created" ? "created" : "updated";
+  const stamp = (fn) => getFileMeta(folderId, language, fn)?.[field] || 0;
+  return arr.sort((a, b) => stamp(b) - stamp(a) || byName(a, b));
+}
+
+// One-time reorder of the manual folder order by the chosen criterion. The new
+// order is persisted (sort_order) and then preserved until the next sort/drag.
+function setFolderSortMode(mode) {
+  if (!folderSortModes.includes(mode)) return;
+  const time = (v) => { const ms = v ? Date.parse(v) : NaN; return Number.isNaN(ms) ? 0 : ms; };
+  const byName = (a, b) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true, sensitivity: "base" });
+  if (mode === "created") savedFolders.sort((a, b) => time(b.createdAt) - time(a.createdAt) || byName(a, b));
+  else if (mode === "edited") savedFolders.sort((a, b) => (b.lastEdited || 0) - (a.lastEdited || 0) || byName(a, b));
+  else savedFolders.sort(byName);
+  persistFolderOrder();
+  toggleFolderSortMenu(false);
+  renderFolders();
+}
+
+function toggleFolderSortMenu(force) {
+  const open = typeof force === "boolean" ? force : els.folderSortMenu.hidden;
+  els.folderSortMenu.hidden = !open;
+  els.folderSortBtn.setAttribute("aria-expanded", String(open));
+}
+
 function clearFolderDropIndicators() {
   els.folderList?.querySelectorAll(".drag-over-before, .drag-over-after")
     .forEach((el) => el.classList.remove("drag-over-before", "drag-over-after"));
@@ -4226,6 +4335,8 @@ function renderFolders() {
     const isOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
     const group = document.createElement("div");
     group.className = "saved-contest-group";
+    // Folders keep a manual order: a sort option reorders once, then drag keeps
+    // that order until the next sort. So dragging stays enabled.
     group.draggable = true;
     group.dataset.folderId = fid;
     group.addEventListener("dragstart", (event) => {
@@ -4280,6 +4391,35 @@ function renderFolders() {
 
     const actions = document.createElement("div");
     actions.className = "temp-file-actions folder-header-actions";
+    const fileMode = folderFileSortMode(fid);
+    const sortDropdown = document.createElement("div");
+    sortDropdown.className = "contest-sort-dropdown folder-file-sort-dropdown";
+    const sortBtn = document.createElement("button");
+    sortBtn.type = "button";
+    sortBtn.className = "temp-file-action folder-file-sort-btn";
+    sortBtn.title = `Sort files in ${folder.name}: ${SORT_LABEL[fileMode]}`;
+    sortBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>';
+    const sortMenu = document.createElement("div");
+    sortMenu.className = "contest-sort-menu";
+    sortMenu.hidden = true;
+    sortMenu.setAttribute("role", "menu");
+    folderSortModes.forEach((m) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "contest-sort-item folder-file-sort-item";
+      item.setAttribute("role", "menuitemradio");
+      item.textContent = SORT_LABEL[m];
+      item.classList.toggle("active", m === fileMode);
+      item.addEventListener("click", (event) => { event.stopPropagation(); setFolderFileSort(fid, m); });
+      sortMenu.append(item);
+    });
+    sortBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const willOpen = sortMenu.hidden;
+      document.querySelectorAll(".folder-file-sort-dropdown .contest-sort-menu").forEach((mn) => { mn.hidden = true; });
+      sortMenu.hidden = !willOpen;
+    });
+    sortDropdown.append(sortBtn, sortMenu);
     const importBtn = document.createElement("button");
     importBtn.type = "button";
     importBtn.className = "temp-file-action";
@@ -4298,7 +4438,21 @@ function renderFolders() {
     delBtn.title = `Delete ${folder.name}`;
     delBtn.innerHTML = ICON_DELETE;
     delBtn.addEventListener("click", (event) => { event.stopPropagation(); deleteFolder(folder); });
-    actions.append(importBtn, renameBtn, delBtn);
+
+    const revealed = folderActionsOpen.has(fid);
+    if (revealed) actions.append(importBtn, sortDropdown, renameBtn, delBtn);
+    const actionsToggle = document.createElement("button");
+    actionsToggle.type = "button";
+    actionsToggle.className = "temp-file-action folder-actions-toggle";
+    actionsToggle.title = revealed ? "Hide folder actions" : "Show folder actions";
+    actionsToggle.textContent = revealed ? "›" : "‹";
+    actionsToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (folderActionsOpen.has(fid)) folderActionsOpen.delete(fid);
+      else folderActionsOpen.add(fid);
+      renderFolders();
+    });
+    actions.append(actionsToggle);
 
     header.append(button, actions);
     group.append(header);
@@ -4309,9 +4463,8 @@ function renderFolders() {
       const language = currentLanguageValue();
       const config = LANGUAGE_CONFIG[language];
       if (isOpen) folder.files = { cpp: cppFileNames.slice(), python: pyFileNames.slice(), java: javaFileNames.slice() };
-      const names = isOpen
-        ? languageState(language).names
-        : ((folder.files && folder.files[language]) || []).slice().sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+      const rawNames = isOpen ? languageState(language).names : ((folder.files && folder.files[language]) || []);
+      const names = sortFolderFiles(fid, language, rawNames);
       if (!names.length) {
         const row = document.createElement("div");
         row.className = "temp-file-empty-row";
@@ -4815,6 +4968,7 @@ function addNextCodeFile() {
   } else if (codeFileScope === "folder") {
     const save = saveFunctionFor(language, "folder");
     save(filename, state.files[filename]).catch(() => {});
+    touchFolderFile(activeFolderId, language, filename, { created: true });
     syncActiveFolderCache();
     renderFolders(); // reflect the new file in the open folder's drawer list immediately
   }

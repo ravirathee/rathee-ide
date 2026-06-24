@@ -40,6 +40,7 @@ const SCHEMA = [
      content LONGTEXT,
      input_text LONGTEXT,
      tests JSON,
+     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
      UNIQUE KEY uniq_file (user_id, language, scope, contest_id, filename),
      KEY idx_user (user_id),
@@ -128,6 +129,8 @@ async function applyMigrations() {
   await ensureColumn("user_folders", "sort_order", "INT NOT NULL DEFAULT 0");
   // Per-file editable test cases ([{input, expected}]).
   await ensureColumn("files", "tests", "JSON");
+  // Track file creation time (for "recently created" sort; updated_at already exists).
+  await ensureColumn("files", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
   await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
@@ -173,7 +176,7 @@ export async function getUserById(id) {
 // ---- Files (per user) ----
 export async function listFiles(userId) {
   const [rows] = await pool.query(
-    `SELECT language, scope, contest_id, filename, content, input_text, tests, updated_at
+    `SELECT language, scope, contest_id, filename, content, input_text, tests, created_at, updated_at
      FROM files WHERE user_id = ? ORDER BY scope, contest_id, filename`,
     [userId]
   );

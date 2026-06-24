@@ -242,7 +242,8 @@ const server = http.createServer(async (req, res) => {
           files: files.map((f) => ({
             language: f.language, scope: f.scope, contestId: f.contest_id,
             filename: f.filename, content: f.content || "", input: f.input_text || "",
-            tests: Array.isArray(f.tests) ? f.tests : null
+            tests: Array.isArray(f.tests) ? f.tests : null,
+            createdAt: f.created_at, updatedAt: f.updated_at
           })),
           contests: contests.map((c) => ({
             contestId: c.contest_id, name: c.name, language: c.language,
