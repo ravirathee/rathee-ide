@@ -25,6 +25,12 @@ const els = {
   createFirstFileBtn: document.querySelector("#createFirstFileBtn"),
   input: document.querySelector("#input"),
   output: document.querySelector("#output"),
+  inputTabs: document.querySelector("#inputTabs"),
+  outputTabs: document.querySelector("#outputTabs"),
+  expectedOutput: document.querySelector("#expectedOutput"),
+  expectedWrap: document.querySelector("#expectedWrap"),
+  yourOutputLabel: document.querySelector("#yourOutputLabel"),
+  verdictBadge: document.querySelector("#verdictBadge"),
   sidePane: document.querySelector("#sidePane"),
   debug: document.querySelector("#debug"),
   callStack: document.querySelector("#callStack"),
@@ -153,6 +159,18 @@ let activeFolderId = ""; // id of the open user folder; DB key for scope='folder
 let savedFolders = []; // [{ folderId, name, files: { cpp: [], python: [], java: [] } }]
 let expandedFolderKeys = new Set();
 let draggedFolderId = ""; // folder being drag-reordered in the drawer
+
+// Per-file Codeforces sample tests: { [filename]: [{ input, expected }] }, one
+// map per language. The custom input stays in the existing *Inputs maps.
+let cppSamples = {};
+let pySamples = {};
+let javaSamples = {};
+// Which test tab is selected (0..N-1 = samples, N = Custom). Linked across the
+// Input and Output tab strips. Reset to 0 on every file/context switch.
+let activeTestIndex = 0;
+// Transient results of the last Run for the active file (not persisted):
+// { file, results: { [i]: { actual, verdict } }, customActual }.
+let testRun = { file: "", results: {}, customActual: null };
 // Files currently open as tabs in the editor (a subset of the file lists). The
 // tab "×" closes a tab (removes it from here); the file itself only goes away
 // when deleted from the left drawer. Kept per-language.
@@ -1537,6 +1555,14 @@ function boot() {
   els.codeRightBtn.addEventListener("click", () => setCodeEditorPlacement("right"));
   els.hideInputBtn.addEventListener("click", () => togglePanel("input"));
   els.hideOutputBtn.addEventListener("click", () => togglePanel("output"));
+  els.input.addEventListener("input", () => {
+    if (els.input.readOnly || editorView !== "code") return; // sample inputs are fixed
+    const state = languageState();
+    if (state.active && activeTests()[activeTestIndex]?.kind === "custom") {
+      state.inputs[state.active] = els.input.value;
+      scheduleWorkspaceCodeSave();
+    }
+  });
   els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
   els.copyOutputBtn.addEventListener("click", () => copyPaneText(els.output.value, els.copyOutputBtn));
   els.copyCodeBtn.addEventListener("click", () => copyPaneText(getCopyCode(), els.copyCodeBtn));
@@ -1992,6 +2018,7 @@ async function loadWorkspaceCppFiles() {
     openCppTabs = cppFileNames.slice();
 
     cppInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
+    cppSamples = {}; // scratch files have no Codeforces sample tests
     cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
     cppProblems = Object.fromEntries(cppFileNames.map((name) => [name, null]));
     activeCppFile = cppFileNames.includes(activeCppFile) ? activeCppFile : cppFileNames[0] || "";
@@ -1999,7 +2026,7 @@ async function loadWorkspaceCppFiles() {
     if (editorView === "code" && els.language.value === "cpp") {
       renderFileTabs();
       setEditorCode(activeCppFile ? cppFiles[activeCppFile] : "");
-      els.input.value = cppInputs[activeCppFile] || "";
+      activeTestIndex = 0; clearTestRun(); refreshIoPanels();
       updateEditorEmptyState();
     }
     // Scope is now "workspace" — re-render the contest + folder drawers so their
@@ -2025,6 +2052,7 @@ async function loadWorkspacePythonFiles() {
     openPyTabs = pyFileNames.slice();
 
     pyInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
+    pySamples = {};
     pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
     pyProblems = Object.fromEntries(pyFileNames.map((name) => [name, null]));
     activePyFile = pyFileNames.includes(activePyFile) ? activePyFile : pyFileNames[0] || "";
@@ -2032,7 +2060,7 @@ async function loadWorkspacePythonFiles() {
     if (editorView === "code" && els.language.value === "python") {
       renderFileTabs();
       setEditorCode(activePyFile ? pyFiles[activePyFile] : "");
-      els.input.value = pyInputs[activePyFile] || "";
+      activeTestIndex = 0; clearTestRun(); refreshIoPanels();
       updateEditorEmptyState();
     }
     renderSavedContests(); // reflect the now-workspace scope in the contest drawer
@@ -2056,6 +2084,7 @@ async function loadWorkspaceJavaFiles() {
     openJavaTabs = javaFileNames.slice();
 
     javaInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
+    javaSamples = {};
     javaTabLabels = Object.fromEntries(javaFileNames.map((name) => [name, name]));
     javaProblems = Object.fromEntries(javaFileNames.map((name) => [name, null]));
     activeJavaFile = javaFileNames.includes(activeJavaFile) ? activeJavaFile : javaFileNames[0] || "";
@@ -2063,7 +2092,7 @@ async function loadWorkspaceJavaFiles() {
     if (editorView === "code" && els.language.value === "java") {
       renderFileTabs();
       setEditorCode(activeJavaFile ? javaFiles[activeJavaFile] : "");
-      els.input.value = javaInputs[activeJavaFile] || "";
+      activeTestIndex = 0; clearTestRun(); refreshIoPanels();
       updateEditorEmptyState();
     }
     renderSavedContests();
@@ -3181,7 +3210,7 @@ function switchLanguage() {
   const files = state.files;
   const inputs = state.inputs;
   setEditorCode(activeFile ? files[activeFile] : "");
-  els.input.value = activeFile ? inputs[activeFile] || "" : "";
+  activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   renderFileTabs();
   renderSavedContests(); // open-contest file rows are language-specific
   renderFolders();
@@ -3520,10 +3549,13 @@ async function openAccountContest(contest, targetProblemIndex = "") {
     };
     localStorage.setItem("rathee.recentContest", JSON.stringify(recentContest));
     scheduleAppSettingsSave();
+    // Use the freshly-fetched problem metadata (samples included) rather than the
+    // possibly-stale savedContests entry loaded earlier.
+    const freshContest = (data.contests || []).find((c) => String(c.contestId) === contestId);
     const synthetic = {
       contestId,
       name: contest.name,
-      problems: contest.problems || [],
+      problems: (freshContest && freshContest.problems) || contest.problems || [],
       files: { language: els.language.value, contestDir: "" }
     };
     // Reopen shows exactly what's saved (onlyStored) so deleted files stay gone.
@@ -3755,6 +3787,22 @@ function deriveProblemFromFilename(filename) {
 // Look up a folder file's Codeforces problem name from the folder's persisted
 // problem list (matched by contestId+index derived from the filename), so the
 // "<file> - <name>" tab label survives a reload.
+// Build a { filename: [{input, expected}] } sample map by matching each file's
+// derived contestId+index against the folder's persisted problem list.
+function samplesForFiles(names, problemList) {
+  const map = {};
+  for (const name of names) {
+    const d = deriveProblemFromFilename(name);
+    if (!d) continue;
+    const p = (problemList || []).find((pr) =>
+      String(pr.contestId) === String(d.contestId) && String(pr.index).toUpperCase() === d.index);
+    if (p && Array.isArray(p.samples) && p.samples.length) {
+      map[name] = p.samples.map((s) => ({ input: s.input || "", expected: s.output ?? s.expected ?? "" }));
+    }
+  }
+  return map;
+}
+
 function folderProblemNameFor(filename, problemList) {
   const derived = deriveProblemFromFilename(filename);
   if (!derived || !Array.isArray(problemList)) return "";
@@ -3786,6 +3834,9 @@ function setArraysFromStored(stored, problemList = []) {
   cppFileNames = c.names; cppFiles = c.files; cppInputs = c.inputs; cppTabLabels = c.labels; cppProblems = c.problems; openCppTabs = c.names.slice();
   pyFileNames = p.names; pyFiles = p.files; pyInputs = p.inputs; pyTabLabels = p.labels; pyProblems = p.problems; openPyTabs = p.names.slice();
   javaFileNames = j.names; javaFiles = j.files; javaInputs = j.inputs; javaTabLabels = j.labels; javaProblems = j.problems; openJavaTabs = j.names.slice();
+  cppSamples = samplesForFiles(c.names, problemList);
+  pySamples = samplesForFiles(p.names, problemList);
+  javaSamples = samplesForFiles(j.names, problemList);
   activeCppFile = cppFileNames[0] || "";
   activePyFile = pyFileNames[0] || "";
   activeJavaFile = javaFileNames[0] || "";
@@ -4038,6 +4089,7 @@ async function importIntoFolder(folder, rawUrl) {
         const name = uniqueFilenameFor(state.names, base, config.extension);
         created[language] = name;
         addFileToActiveFolderContext(language, name, state.template, input, `${name} - ${p.name}`, p);
+        currentSamplesMap(language)[name] = (p.samples || []).map((s) => ({ input: s.input || "", expected: s.output ?? "" }));
       }
       if (!firstName) firstName = created[currentLanguageValue()] || created.cpp;
     }
@@ -4065,7 +4117,10 @@ function persistFolderProblems(folder, imported) {
   const merged = (folder.problems || []).slice();
   const seen = new Set(merged.map((p) => `${p.contestId}|${String(p.index).toUpperCase()}`));
   for (const p of imported) {
-    const entry = { contestId: String(p.contestId), index: String(p.index).toUpperCase(), name: p.name || "" };
+    const entry = {
+      contestId: String(p.contestId), index: String(p.index).toUpperCase(), name: p.name || "",
+      samples: Array.isArray(p.samples) ? p.samples.map((s) => ({ input: s.input || "", output: s.output ?? "" })) : []
+    };
     const key = `${entry.contestId}|${entry.index}`;
     if (!seen.has(key)) { merged.push(entry); seen.add(key); }
   }
@@ -4244,9 +4299,9 @@ function currentContextKey() {
 function stashCurrentContext() {
   if (editorView === "code") saveCurrentState();
   contextSnapshots.set(currentContextKey(), {
-    cpp: { names: cppFileNames.slice(), files: { ...cppFiles }, inputs: { ...cppInputs }, labels: { ...cppTabLabels }, problems: { ...cppProblems }, active: activeCppFile, open: openCppTabs.slice() },
-    python: { names: pyFileNames.slice(), files: { ...pyFiles }, inputs: { ...pyInputs }, labels: { ...pyTabLabels }, problems: { ...pyProblems }, active: activePyFile, open: openPyTabs.slice() },
-    java: { names: javaFileNames.slice(), files: { ...javaFiles }, inputs: { ...javaInputs }, labels: { ...javaTabLabels }, problems: { ...javaProblems }, active: activeJavaFile, open: openJavaTabs.slice() }
+    cpp: { names: cppFileNames.slice(), files: { ...cppFiles }, inputs: { ...cppInputs }, labels: { ...cppTabLabels }, problems: { ...cppProblems }, samples: { ...cppSamples }, active: activeCppFile, open: openCppTabs.slice() },
+    python: { names: pyFileNames.slice(), files: { ...pyFiles }, inputs: { ...pyInputs }, labels: { ...pyTabLabels }, problems: { ...pyProblems }, samples: { ...pySamples }, active: activePyFile, open: openPyTabs.slice() },
+    java: { names: javaFileNames.slice(), files: { ...javaFiles }, inputs: { ...javaInputs }, labels: { ...javaTabLabels }, problems: { ...javaProblems }, samples: { ...javaSamples }, active: activeJavaFile, open: openJavaTabs.slice() }
   });
 }
 
@@ -4254,12 +4309,12 @@ function restoreContext(key) {
   const s = contextSnapshots.get(key);
   if (!s) return false;
   cppFileNames = s.cpp.names.slice(); cppFiles = { ...s.cpp.files }; cppInputs = { ...s.cpp.inputs };
-  cppTabLabels = { ...s.cpp.labels }; cppProblems = { ...s.cpp.problems }; activeCppFile = s.cpp.active; openCppTabs = s.cpp.open.slice();
+  cppTabLabels = { ...s.cpp.labels }; cppProblems = { ...s.cpp.problems }; cppSamples = { ...(s.cpp.samples || {}) }; activeCppFile = s.cpp.active; openCppTabs = s.cpp.open.slice();
   pyFileNames = s.python.names.slice(); pyFiles = { ...s.python.files }; pyInputs = { ...s.python.inputs };
-  pyTabLabels = { ...s.python.labels }; pyProblems = { ...s.python.problems }; activePyFile = s.python.active; openPyTabs = s.python.open.slice();
-  const j = s.java || { names: [], files: {}, inputs: {}, labels: {}, problems: {}, active: "", open: [] };
+  pyTabLabels = { ...s.python.labels }; pyProblems = { ...s.python.problems }; pySamples = { ...(s.python.samples || {}) }; activePyFile = s.python.active; openPyTabs = s.python.open.slice();
+  const j = s.java || { names: [], files: {}, inputs: {}, labels: {}, problems: {}, samples: {}, active: "", open: [] };
   javaFileNames = j.names.slice(); javaFiles = { ...j.files }; javaInputs = { ...j.inputs };
-  javaTabLabels = { ...j.labels }; javaProblems = { ...j.problems }; activeJavaFile = j.active; openJavaTabs = j.open.slice();
+  javaTabLabels = { ...j.labels }; javaProblems = { ...j.problems }; javaSamples = { ...(j.samples || {}) }; activeJavaFile = j.active; openJavaTabs = j.open.slice();
   return true;
 }
 
@@ -4272,7 +4327,7 @@ function renderCurrentContext() {
   editorView = "code";
   setEditorLanguage(els.language.value);
   setEditorCode(active ? (files[active] || "") : "");
-  els.input.value = active ? (inputs[active] || "") : "";
+  activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   updateEditorEmptyState();
   renderFileTabs();
   renderSavedContests();
@@ -4433,7 +4488,7 @@ function closeTab(filename) {
     const nextActiveFile = remaining[Math.max(0, index - 1)] || remaining[0] || "";
     state.setActive(nextActiveFile);
     setEditorCode(nextActiveFile ? files[nextActiveFile] : "");
-    els.input.value = nextActiveFile ? inputs[nextActiveFile] || "" : "";
+    activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   }
   renderFileTabs();
   updateEditorEmptyState();
@@ -4527,7 +4582,7 @@ async function deleteActiveFile(filename) {
     const nextActiveFile = nextFileNames[Math.max(0, index - 1)] || nextFileNames[0] || "";
     state.setActive(nextActiveFile);
     setEditorCode(nextActiveFile ? files[nextActiveFile] : "");
-    els.input.value = nextActiveFile ? inputs[nextActiveFile] || "" : "";
+    activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   }
   refreshDrawerAndTabs();
   updateEditorEmptyState();
@@ -4684,7 +4739,7 @@ function addNextCodeFile() {
   updateEditorActionButton();
   setEditorLanguage(els.language.value);
   setEditorCode(state.files[filename]);
-  els.input.value = "";
+  activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   updateEditorEmptyState();
   if (codeFileScope === "workspace") {
     const save = saveFunctionFor(language, "workspace");
@@ -4772,7 +4827,7 @@ function switchCodeFile(filename) {
   editorView = "code";
   state.setActive(filename);
   setEditorCode(state.files[filename]);
-  els.input.value = state.inputs[filename] || "";
+  activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   updateEditorEmptyState();
   updateDrawerActiveItem();
   renderSavedContests(); // keep the open contest's active-file highlight in sync
@@ -4825,7 +4880,10 @@ function saveCurrentState(options = {}) {
   const state = languageState();
   if (!state.active) return;
   state.files[state.active] = value;
-  state.inputs[state.active] = els.input.value;
+  // els.input holds the active test's input; only the Custom tab maps to the
+  // file's saved input (sample inputs are read-only and live in the samples map).
+  const tests = activeTests();
+  if (tests[activeTestIndex]?.kind === "custom") state.inputs[state.active] = els.input.value;
   scheduleWorkspaceCodeSave();
 }
 
@@ -4946,7 +5004,10 @@ async function importContest() {
 async function persistContestToAccount(result) {
   const contestId = String(result.contestId || "");
   if (!contestId) return;
-  const problems = (result.problems || []).map((p) => ({ index: p.index, name: p.name || "" }));
+  const problems = (result.problems || []).map((p) => ({
+    index: p.index, name: p.name || "",
+    samples: Array.isArray(p.samples) ? p.samples.map((s) => ({ input: s.input || "", output: s.output ?? "" })) : []
+  }));
   await fetch("/api/me/contest", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -4972,7 +5033,7 @@ function addSessionContest(result) {
     name: result.name || els.contestUrl.value.trim(),
     contestId: result.contestId || "",
     contestDir: result.files?.contestDir || "",
-    problems: (result.problems || []).map((p) => ({ index: p.index, name: p.name })),
+    problems: (result.problems || []).map((p) => ({ index: p.index, name: p.name, samples: p.samples || [] })),
     problemCount: (result.problems || []).length,
     files: {
       cpp: (result.problems || []).map((p) => `${p.index}.cpp`),
@@ -5063,6 +5124,16 @@ function applyContestProblems(contest, options = {}) {
   cppFileNames = cpp.names; cppFiles = cpp.files; cppInputs = cpp.inputs; cppTabLabels = cpp.labels; cppProblems = cpp.map;
   pyFileNames = py.names; pyFiles = py.files; pyInputs = py.inputs; pyTabLabels = py.labels; pyProblems = py.map;
   javaFileNames = java.names; javaFiles = java.files; javaInputs = java.inputs; javaTabLabels = java.labels; javaProblems = java.map;
+  const buildContestSamples = (ext) => {
+    const m = {};
+    for (const pr of problems) {
+      if (Array.isArray(pr.samples) && pr.samples.length) {
+        m[`${pr.index}${ext}`] = pr.samples.map((s) => ({ input: s.input || "", expected: s.output ?? s.expected ?? "" }));
+      }
+    }
+    return m;
+  };
+  cppSamples = buildContestSamples(".cpp"); pySamples = buildContestSamples(".py"); javaSamples = buildContestSamples(".java");
   openCppTabs = cpp.names.slice(); openPyTabs = py.names.slice(); openJavaTabs = java.names.slice();
   activeCppFile = cppFileNames[0] || "A.cpp";
   activePyFile = pyFileNames[0] || "A.py";
@@ -5079,9 +5150,8 @@ function applyContestProblems(contest, options = {}) {
   const activeState = languageState(selectedLanguage);
   const activeFile = activeState.active;
   setEditorCode(activeState.files[activeFile] || activeState.template);
-  els.input.value = activeState.inputs[activeFile] || "";
+  activeTestIndex = 0; clearTestRun(); refreshIoPanels();
   updateEditorEmptyState();
-  els.output.value = "";
   const sampleCount = problems.filter((problem) => problem.samples?.length).length;
   const placeholderMessage = contest.placeholder
     ? `Problem data is not available yet. Placeholder A${extension} through G${extension} files were created from ${LANGUAGE_CONFIG[selectedLanguage].templateFile}.`
@@ -5401,6 +5471,119 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
   }
 }
 
+// ---- Test cases (sample I/O tabs) ----------------------------------------
+// Each problem file can carry multiple Codeforces sample tests plus one editable
+// "Custom" test. The Input and Output tab strips are linked: selecting Input N
+// selects Output N. Run executes every sample, compares each to its expected
+// output, and colors the output tabs; Custom runs only when it's selected.
+
+function currentSamplesMap(language = currentLanguageValue()) {
+  return language === "python" ? pySamples : language === "java" ? javaSamples : cppSamples;
+}
+
+function activeFileSamples() {
+  const file = currentActiveFile();
+  return file ? (currentSamplesMap()[file] || []) : [];
+}
+
+// [ ...sample tests, custom test ] for the active file.
+function activeTests() {
+  const file = currentActiveFile();
+  const samples = activeFileSamples();
+  const tests = samples.map((s, i) => ({ kind: "sample", n: i + 1, input: s.input || "", expected: s.expected || "" }));
+  tests.push({ kind: "custom", input: file ? (languageState().inputs[file] || "") : "" });
+  return tests;
+}
+
+function clearTestRun() {
+  testRun = { file: "", results: {}, customActual: null };
+}
+
+// Token/trailing-whitespace-insensitive comparison (standard CP checker rules).
+function normalizeForCompare(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").split("\n")
+    .map((line) => line.replace(/\s+$/, "")).join("\n").replace(/\n+$/, "");
+}
+
+function outputsMatch(actual, expected) {
+  return normalizeForCompare(actual) === normalizeForCompare(expected);
+}
+
+function selectTest(index) {
+  activeTestIndex = index;
+  refreshIoPanels();
+}
+
+function resultForActiveTest(test) {
+  if (testRun.file !== currentActiveFile()) return null;
+  if (test.kind === "custom") return testRun.customActual != null ? { actual: testRun.customActual } : null;
+  return testRun.results[activeTestIndex] || null;
+}
+
+function refreshIoPanels() {
+  if (!els.inputTabs || !els.outputTabs) return;
+  const tests = activeTests();
+  activeTestIndex = Math.min(Math.max(activeTestIndex, 0), tests.length - 1);
+  renderTestTabs(tests);
+  const test = tests[activeTestIndex];
+  const isSample = !!test && test.kind === "sample";
+  els.input.value = test ? test.input : "";
+  els.input.readOnly = isSample; // sample inputs are fixed; edit via the Custom tab
+  const result = test ? resultForActiveTest(test) : null;
+  els.output.value = result?.actual ?? "";
+  els.expectedWrap.hidden = !isSample;
+  els.yourOutputLabel.hidden = !isSample;
+  if (isSample) els.expectedOutput.value = test.expected;
+  updateVerdictBadge(isSample ? result : null);
+}
+
+function updateVerdictBadge(result) {
+  const badge = els.verdictBadge;
+  els.outputSection.classList.remove("verdict-ac", "verdict-wa");
+  badge.classList.remove("ac", "wa");
+  if (!result || !result.verdict) { badge.hidden = true; return; }
+  const ac = result.verdict === "AC";
+  badge.hidden = false;
+  badge.textContent = ac ? "✓ Matches expected" : (result.verdict === "ERR" ? "✗ Error" : "✗ Differs");
+  badge.classList.add(ac ? "ac" : "wa");
+  els.outputSection.classList.add(ac ? "verdict-ac" : "verdict-wa");
+}
+
+function renderTestTabs(tests) {
+  const build = (container, prefix, isOutput) => {
+    container.innerHTML = "";
+    tests.forEach((test, i) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "io-tab";
+      tab.textContent = test.kind === "custom" ? "Custom" : `${prefix} ${test.n}`;
+      tab.classList.toggle("active", i === activeTestIndex);
+      if (isOutput && test.kind === "sample" && testRun.file === currentActiveFile()) {
+        const r = testRun.results[i];
+        if (r) tab.classList.add(r.verdict === "AC" ? "io-tab--ac" : "io-tab--wa");
+      }
+      tab.addEventListener("click", () => selectTest(i));
+      container.append(tab);
+    });
+  };
+  build(els.inputTabs, "Input", false);
+  build(els.outputTabs, "Output", true);
+  const onlyCustom = tests.length <= 1; // no samples → keep the plain single-box look
+  els.inputTabs.hidden = onlyCustom;
+  els.outputTabs.hidden = onlyCustom;
+}
+
+async function runOneTest(language, code, input) {
+  const res = await fetch("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language, code, input, mode: "run", breakpoints: [] })
+  });
+  const result = await res.json();
+  if (!res.ok) throw new Error(result.error || "Execution failed.");
+  return result;
+}
+
 async function submit(mode) {
   if (busy) return;
   saveCurrentState();
@@ -5431,27 +5614,54 @@ async function submit(mode) {
   els.meta.textContent = "Executing...";
 
   try {
-    const res = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        language: els.language.value,
-        code: getRunCode(),
-        input: els.input.value,
-        mode: effectiveMode,
-        breakpoints: effectiveMode === "debug" ? breakpointLines : []
-      })
-    });
+    const code = getRunCode();
+    const language = els.language.value;
+    const tests = activeTests();
+    const samples = tests.filter((t) => t.kind === "sample");
+    const activeTest = tests[activeTestIndex];
+    testRun = { file: currentActiveFile(), results: {}, customActual: null };
 
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || "Execution failed.");
+    let lastResult = null; // whose stderr/debug we surface in the debug pane
+    let hasErr = false;
 
-    els.output.value = result.output || "";
-    setDebuggerOutput(result.debug || result.stderr || "No debug output.");
-    const ok = result.status === "success";
-    setStatus(labelForStatus(result.status), ok ? "success" : "error");
-    els.meta.textContent = `${labelForStatus(result.status)} · ${result.elapsedMs}ms`;
-    showDebug(effectiveMode === "debug" || !ok);
+    // Always run every sample test and record a verdict per test.
+    if (samples.length) {
+      const results = await Promise.all(samples.map((s) => runOneTest(language, code, s.input)));
+      results.forEach((result, i) => {
+        const actual = result.output || "";
+        let verdict;
+        if (result.status !== "success") { verdict = "ERR"; hasErr = true; }
+        else verdict = outputsMatch(actual, samples[i].expected) ? "AC" : "WA";
+        testRun.results[i] = { actual, verdict };
+      });
+      lastResult = results[activeTestIndex] || results[0];
+    }
+
+    // Custom test runs only when it's the selected tab.
+    if (activeTest && activeTest.kind === "custom") {
+      const result = await runOneTest(language, code, activeTest.input);
+      testRun.customActual = result.output || "";
+      lastResult = result;
+      if (!samples.length && result.status !== "success") hasErr = true;
+    }
+
+    refreshIoPanels();
+
+    const debugText = lastResult ? (lastResult.debug || lastResult.stderr || "") : "";
+    if (samples.length) {
+      const passed = Object.values(testRun.results).filter((r) => r.verdict === "AC").length;
+      const ok = !hasErr && passed === samples.length;
+      setStatus(hasErr ? "Error" : (ok ? "Accepted" : "Wrong answer"), ok ? "success" : "error");
+      els.meta.textContent = `Samples: ${passed}/${samples.length} passed`;
+      setDebuggerOutput(debugText || `Ran ${samples.length} sample test(s) — ${passed}/${samples.length} matched expected output.`);
+      showDebug(!ok);
+    } else {
+      const ok = lastResult ? lastResult.status === "success" : false;
+      setStatus(labelForStatus(lastResult?.status), ok ? "success" : "error");
+      els.meta.textContent = `${labelForStatus(lastResult?.status)}${lastResult ? ` · ${lastResult.elapsedMs}ms` : ""}`;
+      setDebuggerOutput(debugText || "No debug output.");
+      showDebug(!ok);
+    }
   } catch (error) {
     setDebuggerOutput(error.message);
     setStatus("Error", "error");

@@ -343,12 +343,14 @@
                 </button>
               </div>
             </div>
+            <div id="inputTabs" class="io-tabs" role="tablist" aria-label="Test inputs"></div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
           <div id="ioResizeHandle" class="resize-handle horizontal-handle" title="Resize input and output"></div>
           <div class="io-section output-section">
             <div class="pane-head">
               <span>Output</span>
+              <span id="verdictBadge" class="verdict-badge" hidden></span>
               <div class="pane-head-actions">
                 <button id="copyOutputBtn" class="copy-button" title="Copy output" aria-label="Copy output">
                   <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -363,7 +365,17 @@
                 </button>
               </div>
             </div>
-            <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
+            <div id="outputTabs" class="io-tabs" role="tablist" aria-label="Test outputs"></div>
+            <div class="output-body">
+              <div class="output-pane">
+                <div class="io-sublabel" id="yourOutputLabel" hidden>Your output</div>
+                <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
+              </div>
+              <div id="expectedWrap" class="output-pane expected-wrap" hidden>
+                <div class="io-sublabel">Expected</div>
+                <textarea id="expectedOutput" spellcheck="false" readonly aria-label="Expected output"></textarea>
+              </div>
+            </div>
           </div>
           </section>
         </section>

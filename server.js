@@ -855,17 +855,31 @@ async function fetchProblemSamples(contestId, index) {
       || html.match(/<div class="sample-test">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/i)?.[1]
       || "";
 
+    // Normalize a <pre> block to plain text: turn line/break tags into newlines
+    // (CF's newer format wraps each line in <div class="test-example-line">),
+    // strip remaining tags, then decode entities.
+    const preText = (raw) => decodeHtml(
+      String(raw).replace(/<br\s*\/?>(?:\s*)/gi, "\n").replace(/<\/div>/gi, "\n").replace(/<[^>]+>/g, "")
+    )
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/^\n+|\n+$/g, "")
+      .concat("\n");
+
+    const grab = (cls) => {
+      const re = new RegExp(`<div class="${cls}">[\\s\\S]*?<pre>([\\s\\S]*?)<\\/pre>`, "gi");
+      const out = [];
+      let m;
+      while ((m = re.exec(sampleBlock)) !== null) out.push(preText(m[1]));
+      return out;
+    };
+    const inputs = grab("input");
+    const outputs = grab("output");
+
     const samples = [];
-    const inputRegex = /<div class="input">[\s\S]*?<pre>([\s\S]*?)<\/pre>/gi;
-    let match;
-    while ((match = inputRegex.exec(sampleBlock)) !== null) {
-      const input = decodeHtml(match[1])
-        .replace(/\r\n/g, "\n")
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .replace(/^\n+|\n+$/g, "")
-        .concat("\n");
-      if (input.trim()) samples.push({ input });
+    for (let i = 0; i < inputs.length; i++) {
+      if (inputs[i].trim()) samples.push({ input: inputs[i], output: outputs[i] || "" });
     }
     return samples;
   } catch {

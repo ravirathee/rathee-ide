@@ -1966,6 +1966,99 @@ textarea,
   grid-row: 3;
 }
 
+/* ---- Sample test tabs (Input / Output) ---- */
+/* io-section now has three rows: pane-head, the tab strip, then the content. */
+.io-section {
+  grid-template-rows: auto auto 1fr;
+}
+
+.io-section > .pane-head { grid-row: 1; }
+.io-tabs { grid-row: 2; }
+.input-section > textarea,
+.output-section > .output-body { grid-row: 3; min-height: 0; }
+
+.io-section.collapsed { grid-template-rows: auto; }
+.io-section.collapsed .io-tabs,
+.io-section.collapsed .output-body { display: none; }
+
+.io-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 5px 8px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.io-tabs::-webkit-scrollbar { display: none; }
+.io-tabs[hidden] { display: none; }
+
+.io-tab {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.io-tab:hover { color: var(--text); }
+
+.io-tab.active {
+  color: var(--text);
+  background: var(--editor-bg);
+  border-color: var(--line-strong);
+}
+
+.io-tab--ac { border-color: #43a047 !important; color: #43a047; }
+.io-tab--wa { border-color: var(--danger) !important; color: var(--danger); }
+
+.output-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.output-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.output-pane[hidden] { display: none; }
+.expected-wrap { border-top: 1px solid var(--line); }
+
+.io-sublabel {
+  padding: 3px 12px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--editor-gutter);
+}
+
+.io-sublabel[hidden] { display: none; }
+
+.verdict-badge {
+  margin-left: 8px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.verdict-badge.ac { color: #0b3d14; background: #6cd47e; }
+.verdict-badge.wa { color: #fff; background: var(--danger); }
+.verdict-badge[hidden] { display: none; }
+
+.output-section.verdict-ac { box-shadow: inset 0 0 0 1.5px rgba(67, 160, 71, 0.75), var(--shadow); }
+.output-section.verdict-wa { box-shadow: inset 0 0 0 1.5px rgba(245, 101, 101, 0.75), var(--shadow); }
+
 .empty-message {
   margin: 0;
   color: var(--muted);
