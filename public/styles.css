@@ -1179,6 +1179,31 @@ body.resizing .drawer-section-resize::after {
   display: flex;
 }
 
+/* CF verdict badge on the right of a problem row; hidden on hover so the
+   edit/delete actions take its place. */
+.temp-file-status {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 55%;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 5px;
+  background: var(--panel-solid);
+  pointer-events: none;
+}
+
+.temp-file-row:hover .temp-file-status { display: none; }
+.temp-file-status.ac { color: #43a047; font-weight: 700; }
+.temp-file-status.wa { color: var(--danger); font-weight: 600; }
+.temp-file-status.partial { color: #f1a02e; font-weight: 600; }
+.temp-file-status.pending { color: var(--muted); }
+.temp-file-status.none { color: var(--muted); font-style: italic; }
+
 .temp-file-action {
   display: inline-flex;
   align-items: center;

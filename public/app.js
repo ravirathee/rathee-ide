@@ -228,6 +228,8 @@ let folderFileSort = (() => {
 })();
 // { `${folderId}|${language}|${filename}`: { created: ms, updated: ms } }
 let folderFileMeta = {};
+// Codeforces verdicts fetched via the Status button: `${contestId}|${index}` -> { verdict }.
+let problemVerdicts = {};
 const SORT_LABEL = { alpha: "Alphabetical", created: "Recently created", edited: "Recently edited" };
 
 let tempFilesExpanded = true; // Temporary Code Files start expanded on load
@@ -1453,7 +1455,12 @@ function boot() {
   els.createFirstFileBtn.addEventListener("click", createFirstCodeFile);
   els.importContestBtn.addEventListener("click", importContest);
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
-  els.cfStatusBtn.addEventListener("click", () => refreshCodeforcesStatus(true));
+  els.cfStatusBtn.addEventListener("click", () => {
+    refreshCodeforcesStatus(true);
+    // Folder/contest scope: fetch verdicts for every problem and badge each row.
+    fetchFolderStatuses();
+    fetchContestStatuses();
+  });
   els.settingsBtn.addEventListener("click", () => showSettings(true));
   els.settingsCloseBtn.addEventListener("click", () => showSettings(false));
   els.settingsOverlay.addEventListener("click", (event) => {
@@ -3807,6 +3814,18 @@ function createManagedFileRow(ctx, label, isActive, onOpen, manageable) {
   btn.addEventListener("click", onOpen);
   row.append(btn);
 
+  // Codeforces verdict badge (shown when not hovering; hover reveals the actions).
+  // Once fetched, a problem with no submission shows "No submission".
+  const pkey = problemKeyForCtx(ctx);
+  const entry = pkey ? problemVerdicts[pkey] : null;
+  if (entry) {
+    const disp = entry.verdict ? verdictDisplay(entry.verdict) : { text: "No submission", cls: "none" };
+    const status = document.createElement("span");
+    status.className = `temp-file-status ${disp.cls}`;
+    status.textContent = disp.text;
+    row.append(status);
+  }
+
   if (manageable) {
     const actions = document.createElement("div");
     actions.className = "temp-file-actions";
@@ -3890,6 +3909,22 @@ function deriveProblemFromFilename(filename) {
   const match = base.match(/^(\d+)([A-Za-z]\d*)$/);
   if (!match) return null;
   return { contestId: match[1], index: match[2].toUpperCase() };
+}
+
+// CF problem identity for a drawer row, used to look up its verdict badge.
+// Folder files embed the id in the name (1904A.cpp); contest files are just the
+// index (A.cpp) with the id coming from the open contest.
+function problemKeyForCtx(ctx) {
+  if (!ctx) return null;
+  if (ctx.scope === "contest") {
+    const index = String(ctx.filename).replace(/\.[^.]+$/, "").toUpperCase();
+    return ctx.contestId && index ? `${ctx.contestId}|${index}` : null;
+  }
+  if (ctx.scope === "folder") {
+    const d = deriveProblemFromFilename(ctx.filename);
+    return d ? `${d.contestId}|${d.index}` : null;
+  }
+  return null;
 }
 
 // Look up a folder file's Codeforces problem name from the folder's persisted
@@ -4221,6 +4256,7 @@ async function importIntoFolder(folder, rawUrl) {
     els.meta.textContent = list.length === 1
       ? `${list[0].index}. ${list[0].name} added to ${folder.name}`
       : `${list.length} problems added to ${folder.name}`;
+    fetchFolderStatuses(); // auto-check each problem's verdict on import
   } catch (error) {
     setStatus("Import failed", "error");
     els.meta.textContent = error.message || "Codeforces import failed";
@@ -5214,6 +5250,7 @@ async function importContest() {
     } else {
       addSessionContest(result); // show it in the drawer for this session only
     }
+    fetchContestStatuses(); // auto-check each problem's verdict on import
   } catch (error) {
     setDebuggerOutput(error.message);
     setStatus("Import failed", "error");
@@ -5627,6 +5664,75 @@ function duplicateHeaderPrefixLineCount(source) {
     break;
   }
   return index;
+}
+
+// Map a Codeforces verdict to a short label + style class for the drawer badge.
+function verdictDisplay(v) {
+  if (!v) return null;
+  if (v === "OK") return { text: "Accepted", cls: "ac" };
+  if (v === "TESTING") return { text: "Testing", cls: "pending" };
+  const map = {
+    WRONG_ANSWER: "Wrong answer", TIME_LIMIT_EXCEEDED: "TLE", MEMORY_LIMIT_EXCEEDED: "MLE",
+    RUNTIME_ERROR: "Runtime error", COMPILATION_ERROR: "Compile error", PARTIAL: "Partial",
+    IDLENESS_LIMIT_EXCEEDED: "ILE", SKIPPED: "Skipped", CHALLENGED: "Hacked"
+  };
+  const orange = new Set(["PARTIAL", "CHALLENGED"]); // Partial / Hacked → orange
+  return { text: map[v] || v.replace(/_/g, " ").toLowerCase(), cls: orange.has(v) ? "partial" : "wa" };
+}
+
+// Status button (folder scope): fetch the latest CF verdict for every problem in
+// the open folder and show it on each problem's drawer row.
+async function fetchFolderStatuses() {
+  if (codeFileScope !== "folder" || !activeFolderId || !validCodeforcesHandle()) return;
+  const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
+  const probs = new Map();
+  const addNames = (names) => {
+    for (const fn of (names || [])) {
+      const d = deriveProblemFromFilename(fn);
+      if (d) probs.set(`${d.contestId}|${d.index}`, d);
+    }
+  };
+  for (const lang of SUPPORTED_LANGUAGES) {
+    addNames(folder?.files?.[lang]);
+    addNames(languageState(lang).names); // live arrays of the open folder
+  }
+  if (!probs.size) return;
+  els.meta.textContent = "Fetching Codeforces verdicts...";
+  for (const [key, p] of probs) {
+    try {
+      const params = new URLSearchParams({ handle: codeforcesHandle, contestId: p.contestId, index: p.index });
+      const res = await fetch(`/api/codeforces/status?${params}`);
+      const result = await res.json();
+      problemVerdicts[key] = { verdict: (res.ok && result.latest) ? (result.latest.verdict || "TESTING") : null };
+      renderFolders(); // progressive update as each verdict arrives
+    } catch { /* leave this problem unknown */ }
+  }
+  els.meta.textContent = "Codeforces verdicts updated";
+}
+
+// Status button (contest scope): fetch the latest CF verdict for every problem
+// in the open contest and show it on each problem's drawer row.
+async function fetchContestStatuses() {
+  if (codeFileScope !== "contest" || !activeContestId || !validCodeforcesHandle()) return;
+  const indices = new Set();
+  for (const lang of SUPPORTED_LANGUAGES) {
+    for (const fn of languageState(lang).names) {
+      const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase();
+      if (idx) indices.add(idx);
+    }
+  }
+  if (!indices.size) return;
+  els.meta.textContent = "Fetching Codeforces verdicts...";
+  for (const index of indices) {
+    try {
+      const params = new URLSearchParams({ handle: codeforcesHandle, contestId: activeContestId, index });
+      const res = await fetch(`/api/codeforces/status?${params}`);
+      const result = await res.json();
+      problemVerdicts[`${activeContestId}|${index}`] = { verdict: (res.ok && result.latest) ? (result.latest.verdict || "TESTING") : null };
+      renderSavedContests(); // progressive update
+    } catch { /* leave this problem unknown */ }
+  }
+  els.meta.textContent = "Codeforces verdicts updated";
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
