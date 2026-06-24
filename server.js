@@ -703,9 +703,11 @@ async function fetchCodeforcesVerdicts({ handle }) {
   const apiUrl = new URL("https://codeforces.com/api/user.status");
   apiUrl.searchParams.set("handle", handle);
   apiUrl.searchParams.set("from", "1");
-  apiUrl.searchParams.set("count", "10000");
+  apiUrl.searchParams.set("count", "5000");
+  // Full-history fetch is a large response; allow more time than the default.
   const { ok, status, data } = await httpsGetJson(apiUrl, {
-    headers: { "User-Agent": "Forge-IDE/1.0" }
+    headers: { "User-Agent": "Forge-IDE/1.0" },
+    timeoutMs: 30000
   });
   if (!ok || data?.status !== "OK") {
     throw new Error(data?.comment || `Codeforces status request failed with ${status}.`);
@@ -767,7 +769,7 @@ async function fetchCodeforcesStatus({ handle, contestId, index }) {
   return { handle, contestId, index, submissions, latest: submissions[0] || null };
 }
 
-function httpsGetText(url, { headers = {} } = {}) {
+function httpsGetText(url, { headers = {}, timeoutMs = 10000 } = {}) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, { headers }, (response) => {
       let body = "";
@@ -778,12 +780,12 @@ function httpsGetText(url, { headers = {} } = {}) {
       });
     });
     request.on("error", reject);
-    request.setTimeout(10000, () => request.destroy(new Error("Codeforces request timed out.")));
+    request.setTimeout(timeoutMs, () => request.destroy(new Error("Codeforces request timed out.")));
   });
 }
 
-async function httpsGetJson(url, { headers = {} } = {}) {
-  const { ok, status, body } = await httpsGetText(url, { headers });
+async function httpsGetJson(url, { headers = {}, timeoutMs = 10000 } = {}) {
+  const { ok, status, body } = await httpsGetText(url, { headers, timeoutMs });
   let data = null;
   try { data = JSON.parse(body); } catch { /* leave data null on non-JSON */ }
   return { ok, status, data };
