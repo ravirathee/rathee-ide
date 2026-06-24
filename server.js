@@ -10,7 +10,7 @@ import {
   initStore, dbReady, upsertUser, getUserById,
   listFiles, saveFile, deleteFile,
   listContests, addContest, removeContest,
-  listFolders, addFolder, removeFolder,
+  listFolders, addFolder, removeFolder, setFolderOrder,
   getSettings, saveSettings,
   getTemplates, saveTemplate
 } from "./store.js";
@@ -294,6 +294,12 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
 
+      if (req.method === "PUT" && url.pathname === "/api/me/folders/order") {
+        const b = await readJsonBody(req);
+        if (!b || !Array.isArray(b.order)) return sendJson(res, 400, { error: "order array required" });
+        await setFolderOrder(uid, b.order.map(String));
+        return sendJson(res, 200, { ok: true });
+      }
       if (req.method === "DELETE" && url.pathname === "/api/me/folder") {
         const b = await readJsonBody(req);
         if (!b || !b.folderId) return sendJson(res, 400, { error: "folderId required" });

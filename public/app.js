@@ -152,6 +152,7 @@ let activeContestId = ""; // Codeforces id of the open contest; DB key for scope
 let activeFolderId = ""; // id of the open user folder; DB key for scope='folder' files
 let savedFolders = []; // [{ folderId, name, files: { cpp: [], python: [], java: [] } }]
 let expandedFolderKeys = new Set();
+let draggedFolderId = ""; // folder being drag-reordered in the drawer
 // Files currently open as tabs in the editor (a subset of the file lists). The
 // tab "×" closes a tab (removes it from here); the file itself only goes away
 // when deleted from the left drawer. Kept per-language.
@@ -3824,6 +3825,7 @@ async function createFolder() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folderId, name })
     }).catch(() => {});
+    persistFolderOrder(); // give the new (appended) folder a sort_order
   }
   renderFolders();
   setStatus("Folder created", "success");
@@ -4076,6 +4078,34 @@ function persistFolderProblems(folder, imported) {
   }).catch(() => {});
 }
 
+function clearFolderDropIndicators() {
+  els.folderList?.querySelectorAll(".drag-over-before, .drag-over-after")
+    .forEach((el) => el.classList.remove("drag-over-before", "drag-over-after"));
+}
+
+// Move `draggedId` to just before/after `targetId` in savedFolders, re-render,
+// and persist the new order to the account.
+function reorderFolders(draggedId, targetId, placeAfter) {
+  const from = savedFolders.findIndex((f) => String(f.folderId) === String(draggedId));
+  if (from === -1) return;
+  const [moved] = savedFolders.splice(from, 1);
+  let to = savedFolders.findIndex((f) => String(f.folderId) === String(targetId));
+  if (to === -1) { savedFolders.splice(from, 0, moved); return; } // target gone; undo
+  if (placeAfter) to += 1;
+  savedFolders.splice(to, 0, moved);
+  renderFolders();
+  persistFolderOrder();
+}
+
+function persistFolderOrder() {
+  if (!isAuthed()) return; // anonymous: order is in-memory only for the session
+  fetch("/api/me/folders/order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order: savedFolders.map((f) => String(f.folderId)) })
+  }).catch(() => {});
+}
+
 function renderFolders() {
   if (!els.folderList) return;
   els.folderList.innerHTML = "";
@@ -4085,6 +4115,40 @@ function renderFolders() {
     const isOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
     const group = document.createElement("div");
     group.className = "saved-contest-group";
+    group.draggable = true;
+    group.dataset.folderId = fid;
+    group.addEventListener("dragstart", (event) => {
+      // Don't hijack text selection in an inline rename/import field.
+      if (event.target.closest("input, textarea")) { event.preventDefault(); return; }
+      draggedFolderId = fid;
+      group.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      try { event.dataTransfer.setData("text/plain", fid); } catch { /* some browsers require this */ }
+    });
+    group.addEventListener("dragend", () => {
+      group.classList.remove("dragging");
+      clearFolderDropIndicators();
+      draggedFolderId = "";
+    });
+    group.addEventListener("dragover", (event) => {
+      if (!draggedFolderId || draggedFolderId === fid) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const rect = group.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      clearFolderDropIndicators();
+      group.classList.add(after ? "drag-over-after" : "drag-over-before");
+    });
+    group.addEventListener("dragleave", () => {
+      group.classList.remove("drag-over-before", "drag-over-after");
+    });
+    group.addEventListener("drop", (event) => {
+      if (!draggedFolderId || draggedFolderId === fid) return;
+      event.preventDefault();
+      const rect = group.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      reorderFolders(draggedFolderId, fid, after);
+    });
 
     const header = document.createElement("div");
     header.className = "saved-contest-header folder-header";

@@ -49,6 +49,7 @@ const SCHEMA = [
      folder_id VARCHAR(64) NOT NULL,
      name VARCHAR(255),
      problems JSON,
+     sort_order INT NOT NULL DEFAULT 0,
      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
      PRIMARY KEY (user_id, folder_id),
      CONSTRAINT fk_uf_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -122,6 +123,8 @@ async function applyMigrations() {
   await ensureColumn("user_contests", "problems", "JSON");
   // Folders persist the imported problems' names so labels survive a reload.
   await ensureColumn("user_folders", "problems", "JSON");
+  // Drag-and-drop folder ordering.
+  await ensureColumn("user_folders", "sort_order", "INT NOT NULL DEFAULT 0");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
   await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
@@ -219,13 +222,23 @@ export async function removeContest(userId, contestId) {
 // ---- Folders (per user; user-created containers of code files) ----
 export async function listFolders(userId) {
   const [rows] = await pool.query(
-    `SELECT folder_id, name, problems, created_at FROM user_folders WHERE user_id = ? ORDER BY created_at ASC`,
+    `SELECT folder_id, name, problems, created_at FROM user_folders WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC`,
     [userId]
   );
   return rows.map((r) => ({
     ...r,
     problems: typeof r.problems === "string" ? JSON.parse(r.problems || "[]") : (r.problems || [])
   }));
+}
+
+// Persist the user's folder order: each folder's sort_order becomes its index
+// in the provided list. Unknown ids are ignored.
+export async function setFolderOrder(userId, orderedIds) {
+  const ids = Array.isArray(orderedIds) ? orderedIds : [];
+  await Promise.all(ids.map((folderId, index) => pool.query(
+    `UPDATE user_folders SET sort_order = ? WHERE user_id = ? AND folder_id = ?`,
+    [index, userId, String(folderId)]
+  )));
 }
 
 // `name` and `problems` are updated only when provided (COALESCE), so a rename

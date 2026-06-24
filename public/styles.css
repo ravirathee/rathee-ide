@@ -983,6 +983,23 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+/* Drag-and-drop folder reordering. */
+.saved-contest-group[draggable="true"] .folder-header .contest-title {
+  cursor: grab;
+}
+
+.saved-contest-group.dragging {
+  opacity: 0.45;
+}
+
+.saved-contest-group.drag-over-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.saved-contest-group.drag-over-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
 /* Contest header row: the expand/collapse button plus a hover delete icon. */
 .saved-contest-header {
   position: relative;
