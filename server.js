@@ -439,6 +439,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
+    if (req.method === "GET" && url.pathname === "/api/codeforces/verdicts") {
+      const handle = url.searchParams.get("handle") || "";
+      const result = await fetchCodeforcesVerdicts({ handle });
+      return sendJson(res, 200, result);
+    }
+
     if (req.method === "GET" && url.pathname === "/api/codeforces/profile") {
       const handle = url.searchParams.get("handle") || "";
       const result = await fetchCodeforcesProfile({ handle });
@@ -685,6 +691,37 @@ function buildPlaceholderContest(contestId, contest, reason) {
       placeholder: true
     }))
   };
+}
+
+// Best verdict per problem across the user's whole (recent) submission history:
+// "OK" if the problem was ever accepted, otherwise the most recent verdict.
+// Returns { handle, verdicts: { "<contestId>|<INDEX>": verdict } }.
+async function fetchCodeforcesVerdicts({ handle }) {
+  if (!/^[A-Za-z0-9_.-]{3,24}$/.test(handle)) {
+    throw new Error("Invalid Codeforces handle.");
+  }
+  const apiUrl = new URL("https://codeforces.com/api/user.status");
+  apiUrl.searchParams.set("handle", handle);
+  apiUrl.searchParams.set("from", "1");
+  apiUrl.searchParams.set("count", "10000");
+  const { ok, status, data } = await httpsGetJson(apiUrl, {
+    headers: { "User-Agent": "Forge-IDE/1.0" }
+  });
+  if (!ok || data?.status !== "OK") {
+    throw new Error(data?.comment || `Codeforces status request failed with ${status}.`);
+  }
+  const verdicts = {};
+  // data.result is newest-first; first seen per problem = latest verdict, and an
+  // OK anywhere in the history overrides it.
+  for (const submission of data.result) {
+    const cid = submission.problem?.contestId;
+    const idx = submission.problem?.index;
+    if (cid == null || !idx) continue;
+    const key = `${cid}|${String(idx).toUpperCase()}`;
+    if (!(key in verdicts)) verdicts[key] = submission.verdict || "TESTING";
+    if (submission.verdict === "OK") verdicts[key] = "OK";
+  }
+  return { handle, verdicts };
 }
 
 async function fetchCodeforcesStatus({ handle, contestId, index }) {

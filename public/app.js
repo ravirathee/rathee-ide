@@ -228,8 +228,17 @@ let folderFileSort = (() => {
 })();
 // { `${folderId}|${language}|${filename}`: { created: ms, updated: ms } }
 let folderFileMeta = {};
-// Codeforces verdicts fetched via the Status button: `${contestId}|${index}` -> { verdict }.
-let problemVerdicts = {};
+// Codeforces verdicts: `${contestId}|${index}` -> { verdict }. Persisted to the
+// account settings (DB) and mirrored to localStorage so they show from storage
+// on load instead of being re-fetched every time.
+let problemVerdicts = (() => {
+  try { return JSON.parse(localStorage.getItem("rathee.problemVerdicts") || "{}") || {}; } catch { return {}; }
+})();
+
+function saveProblemVerdicts() {
+  try { localStorage.setItem("rathee.problemVerdicts", JSON.stringify(problemVerdicts)); } catch { /* quota */ }
+  scheduleAppSettingsSave();
+}
 const SORT_LABEL = { alpha: "Alphabetical", created: "Recently created", edited: "Recently edited" };
 
 let tempFilesExpanded = true; // Temporary Code Files start expanded on load
@@ -563,6 +572,9 @@ function applyAppSettings(settings) {
   if (settings.autoCompletion !== undefined) {
     autoCompletion = normalizeAutoCompletionSettings(settings.autoCompletion);
   }
+  if (settings.problemVerdicts && typeof settings.problemVerdicts === "object") {
+    problemVerdicts = { ...problemVerdicts, ...settings.problemVerdicts };
+  }
 
   const layout = settings.layout || {};
   if (Number.isFinite(Number(layout.drawerWidth))) layoutState.drawerWidth = Number(layout.drawerWidth);
@@ -593,6 +605,7 @@ function currentAppSettings() {
       zoom: uiZoom
     },
     autoCompletion,
+    problemVerdicts,
     layout: {
       layoutVersion: LAYOUT_SETTINGS_VERSION,
       drawerWidth: layoutState.drawerWidth,
@@ -4256,7 +4269,7 @@ async function importIntoFolder(folder, rawUrl) {
     els.meta.textContent = list.length === 1
       ? `${list[0].index}. ${list[0].name} added to ${folder.name}`
       : `${list.length} problems added to ${folder.name}`;
-    fetchFolderStatuses(); // auto-check each problem's verdict on import
+    fetchFolderStatuses({ onlyMissing: true }); // check only newly-imported problems
   } catch (error) {
     setStatus("Import failed", "error");
     els.meta.textContent = error.message || "Codeforces import failed";
@@ -5250,7 +5263,7 @@ async function importContest() {
     } else {
       addSessionContest(result); // show it in the drawer for this session only
     }
-    fetchContestStatuses(); // auto-check each problem's verdict on import
+    fetchContestStatuses({ onlyMissing: true }); // check only newly-imported problems
   } catch (error) {
     setDebuggerOutput(error.message);
     setStatus("Import failed", "error");
@@ -5680,59 +5693,57 @@ function verdictDisplay(v) {
   return { text: map[v] || v.replace(/_/g, " ").toLowerCase(), cls: orange.has(v) ? "partial" : "wa" };
 }
 
-// Status button (folder scope): fetch the latest CF verdict for every problem in
-// the open folder and show it on each problem's drawer row.
-async function fetchFolderStatuses() {
+// One bulk call gets the best verdict per problem (OK = ever accepted), then we
+// badge the given problem keys. relevantKeys also get a "No submission" marker
+// when absent from the history so the row shows a status.
+async function applyVerdictsForKeys(relevantKeys, { onlyMissing = false } = {}) {
+  if (!validCodeforcesHandle() || !relevantKeys.length) return;
+  if (onlyMissing && relevantKeys.every((k) => problemVerdicts[k])) return; // all cached
+  els.meta.textContent = "Fetching Codeforces verdicts...";
+  try {
+    const res = await fetch(`/api/codeforces/verdicts?handle=${encodeURIComponent(codeforcesHandle)}`);
+    const result = await res.json();
+    if (!res.ok || !result.verdicts) throw new Error(result.error || "Failed");
+    for (const [k, v] of Object.entries(result.verdicts)) problemVerdicts[k] = { verdict: v };
+    for (const k of relevantKeys) if (!problemVerdicts[k]) problemVerdicts[k] = { verdict: null }; // No submission
+    saveProblemVerdicts();
+    renderFolders();
+    renderSavedContests();
+    els.meta.textContent = "Codeforces verdicts updated";
+  } catch {
+    els.meta.textContent = "Could not fetch Codeforces verdicts";
+  }
+}
+
+// Status / import (folder scope): verdicts for every problem in the open folder.
+async function fetchFolderStatuses({ onlyMissing = false } = {}) {
   if (codeFileScope !== "folder" || !activeFolderId || !validCodeforcesHandle()) return;
   const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
-  const probs = new Map();
+  const keys = new Set();
   const addNames = (names) => {
     for (const fn of (names || [])) {
       const d = deriveProblemFromFilename(fn);
-      if (d) probs.set(`${d.contestId}|${d.index}`, d);
+      if (d) keys.add(`${d.contestId}|${d.index}`);
     }
   };
   for (const lang of SUPPORTED_LANGUAGES) {
     addNames(folder?.files?.[lang]);
     addNames(languageState(lang).names); // live arrays of the open folder
   }
-  if (!probs.size) return;
-  els.meta.textContent = "Fetching Codeforces verdicts...";
-  for (const [key, p] of probs) {
-    try {
-      const params = new URLSearchParams({ handle: codeforcesHandle, contestId: p.contestId, index: p.index });
-      const res = await fetch(`/api/codeforces/status?${params}`);
-      const result = await res.json();
-      problemVerdicts[key] = { verdict: (res.ok && result.latest) ? (result.latest.verdict || "TESTING") : null };
-      renderFolders(); // progressive update as each verdict arrives
-    } catch { /* leave this problem unknown */ }
-  }
-  els.meta.textContent = "Codeforces verdicts updated";
+  await applyVerdictsForKeys([...keys], { onlyMissing });
 }
 
-// Status button (contest scope): fetch the latest CF verdict for every problem
-// in the open contest and show it on each problem's drawer row.
-async function fetchContestStatuses() {
+// Status / import (contest scope): verdicts for every problem in the open contest.
+async function fetchContestStatuses({ onlyMissing = false } = {}) {
   if (codeFileScope !== "contest" || !activeContestId || !validCodeforcesHandle()) return;
-  const indices = new Set();
+  const keys = new Set();
   for (const lang of SUPPORTED_LANGUAGES) {
     for (const fn of languageState(lang).names) {
       const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase();
-      if (idx) indices.add(idx);
+      if (idx) keys.add(`${activeContestId}|${idx}`);
     }
   }
-  if (!indices.size) return;
-  els.meta.textContent = "Fetching Codeforces verdicts...";
-  for (const index of indices) {
-    try {
-      const params = new URLSearchParams({ handle: codeforcesHandle, contestId: activeContestId, index });
-      const res = await fetch(`/api/codeforces/status?${params}`);
-      const result = await res.json();
-      problemVerdicts[`${activeContestId}|${index}`] = { verdict: (res.ok && result.latest) ? (result.latest.verdict || "TESTING") : null };
-      renderSavedContests(); // progressive update
-    } catch { /* leave this problem unknown */ }
-  }
-  els.meta.textContent = "Codeforces verdicts updated";
+  await applyVerdictsForKeys([...keys], { onlyMissing });
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
