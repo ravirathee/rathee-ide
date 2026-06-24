@@ -796,7 +796,6 @@ button:disabled {
   flex-direction: column;
   min-height: 64px;
   height: var(--folders-height, 220px);
-  border-top: 1px solid var(--line);
 }
 
 .folder-list {
@@ -866,17 +865,32 @@ button:disabled {
   margin-right: 6px;
 }
 
+/* Single full-width separator between Contests and Folders that is itself the
+   resize handle — the whole line highlights on hover/drag. */
 .drawer-section-resize {
   flex: 0 0 auto;
   height: 7px;
-  cursor: ns-resize;
-  background:
-    linear-gradient(var(--line), var(--line)) center / 60% 1px no-repeat;
+  cursor: row-resize;
+  position: relative;
+  background: transparent;
 }
 
-.drawer-section-resize:hover {
-  background:
-    linear-gradient(rgba(var(--accent-rgb), 0.8), rgba(var(--accent-rgb), 0.8)) center / 70% 2px no-repeat;
+.drawer-section-resize::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 1px;
+  background: var(--line);
+  transition: background var(--t-fast), height var(--t-fast);
+}
+
+.drawer-section-resize:hover::after,
+body.resizing .drawer-section-resize::after {
+  height: 2px;
+  background: var(--accent);
 }
 
 .drawer-label {
@@ -1373,6 +1387,12 @@ button:disabled {
   z-index: 4;
   background: transparent;
 }
+
+/* While dragging any handle, lock the resize cursor across the page and stop
+   text selection — so the cursor doesn't flip back to an arrow mid-drag. */
+body.resizing { user-select: none; }
+body.resizing-row, body.resizing-row * { cursor: row-resize !important; }
+body.resizing-col, body.resizing-col * { cursor: col-resize !important; }
 
 .resize-handle::after {
   content: "";

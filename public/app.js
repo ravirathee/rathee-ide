@@ -3206,6 +3206,7 @@ function initResizablePanes() {
   els.debugResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug"));
   els.debugSplitResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug-split"));
   els.expectedResizeHandle?.addEventListener("pointerdown", (event) => startResize(event, "expected-split"));
+  els.drawerSectionResize?.addEventListener("pointerdown", (event) => startResize(event, "folders"));
 }
 
 function startResize(event, target) {
@@ -3223,7 +3224,20 @@ function startResize(event, target) {
   const debugRect = els.editorDebugPanel.getBoundingClientRect();
   const outputBodyRect = els.outputBody?.getBoundingClientRect();
   const startExpectedHeight = layoutState.expectedHeight;
-  document.body.classList.add("resizing");
+  const startFoldersHeight = els.foldersSection?.offsetHeight || 0; // CSS px (unaffected by shell zoom)
+  const startContestsHeight = (els.savedContestSection && !els.savedContestSection.hidden)
+    ? els.savedContestSection.offsetHeight : 0;
+  // Visible space above the divider (CSS px) — folders can't grow past it,
+  // so the content above (temp files / contests header) stays on screen.
+  const sectionContainer = els.foldersSection?.parentElement || null;
+  const spaceAboveCss = (sectionContainer && els.drawerSectionResize)
+    ? Math.max(0, (els.drawerSectionResize.getBoundingClientRect().top - sectionContainer.getBoundingClientRect().top) / (uiZoom || 1))
+    : Infinity;
+  // Lock the resize cursor across the whole page while dragging (otherwise it
+  // reverts to the arrow once the pointer leaves the thin handle).
+  const rowResize = target === "io" || target === "debug" || target === "folders"
+    || (target === "expected-split" && layoutState.expectedSide !== "right");
+  document.body.classList.add("resizing", rowResize ? "resizing-row" : "resizing-col");
 
   const onMove = (moveEvent) => {
     if (target === "main") {
@@ -3252,13 +3266,32 @@ function startResize(event, target) {
         : (moveEvent.clientY - startY) / outputBodyRect.height;
       layoutState.expectedHeight = clamp(startExpectedHeight - delta * 100, 15, 82);
     }
+    if (target === "folders" && els.foldersSection) {
+      // Drag up → taller Folders section. The cursor delta is in visual pixels;
+      // divide by the shell zoom to get CSS pixels so the line tracks the cursor
+      // exactly (no jump). startFoldersHeight is offsetHeight (already CSS px).
+      const dyCss = (startY - moveEvent.clientY) / (uiZoom || 1);
+      // Cap growth so the Contests section keeps room for its "Saved Contests"
+      // header (folders grows 1:1 as contests shrinks).
+      const CONTESTS_MIN = 76; // keep the "Saved Contests" header visible
+      const MIN_ABOVE = 96;    // keep room above the divider when no contests
+      let maxFolders = (window.innerHeight / (uiZoom || 1)) - 160;
+      if (Number.isFinite(spaceAboveCss)) maxFolders = Math.min(maxFolders, startFoldersHeight + spaceAboveCss - MIN_ABOVE);
+      if (startContestsHeight > 0) maxFolders = Math.min(maxFolders, startFoldersHeight + startContestsHeight - CONTESTS_MIN);
+      const h = clamp(startFoldersHeight + dyCss, 64, Math.max(64, maxFolders));
+      els.foldersSection.style.height = `${h}px`;
+      return; // folders height is a direct style, not part of applyWorkspaceLayout
+    }
     applyWorkspaceLayout();
   };
 
   const onUp = () => {
-    document.body.classList.remove("resizing");
+    document.body.classList.remove("resizing", "resizing-row", "resizing-col");
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    if (target === "folders" && els.foldersSection) {
+      localStorage.setItem("rathee.foldersHeight", String(parseInt(els.foldersSection.style.height, 10) || 220));
+    }
   };
 
   window.addEventListener("pointermove", onMove);
@@ -3826,33 +3859,14 @@ function refreshDrawerAndTabs() {
 
 // Draggable divider between Saved Contests and Folders: drag adjusts the Folders
 // section height; persisted in localStorage.
+// Restore the saved Folders-section height on load. The drag itself is handled
+// by the unified startResize("folders") wired in initResizablePanes, so it
+// highlights and behaves like every other resize handle.
 function initSectionResize() {
-  const handle = els.drawerSectionResize;
   const section = els.foldersSection;
-  if (!handle || !section) return;
+  if (!section) return;
   const saved = Number(localStorage.getItem("rathee.foldersHeight"));
   if (saved && saved > 64) section.style.height = `${saved}px`;
-  let startY = 0;
-  let startH = 0;
-  const onMove = (e) => {
-    const dy = startY - e.clientY; // drag up → taller folders
-    const h = Math.max(64, Math.min(window.innerHeight - 160, startH + dy));
-    section.style.height = `${h}px`;
-  };
-  const onUp = () => {
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
-    document.body.style.userSelect = "";
-    localStorage.setItem("rathee.foldersHeight", String(parseInt(section.style.height, 10) || 220));
-  };
-  handle.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    startY = e.clientY;
-    startH = section.getBoundingClientRect().height;
-    document.body.style.userSelect = "none";
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  });
 }
 
 function generateFolderId() {
