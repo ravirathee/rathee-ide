@@ -160,7 +160,13 @@ let activeContestDir = "";
 let activeContestId = ""; // Codeforces id of the open contest; DB key for scope='contest' files
 let activeFolderId = ""; // id of the open user folder; DB key for scope='folder' files
 let savedFolders = []; // [{ folderId, name, files: { cpp: [], python: [], java: [] } }]
-let expandedFolderKeys = new Set();
+let expandedFolderKeys = new Set((() => {
+  try { return JSON.parse(localStorage.getItem("rathee.expandedFolders") || "[]"); } catch { return []; }
+})());
+
+function saveExpandedFolders() {
+  localStorage.setItem("rathee.expandedFolders", JSON.stringify([...expandedFolderKeys]));
+}
 let draggedFolderId = ""; // folder being drag-reordered in the drawer
 
 // Per-file Codeforces sample tests: { [filename]: [{ input, expected }] }, one
@@ -3915,6 +3921,7 @@ async function createFolder() {
   const name = nextFolderName();
   savedFolders.push({ folderId, name, problems: [], files: { cpp: [], python: [], java: [] } });
   expandedFolderKeys.add(folderId);
+  saveExpandedFolders();
   if (isAuthed()) {
     await fetch("/api/me/folder", {
       method: "PUT",
@@ -3974,6 +3981,7 @@ async function deleteFolder(folder) {
   contextSnapshots.delete(`folder:${fid}`);
   savedFolders = savedFolders.filter((f) => String(f.folderId) !== fid);
   expandedFolderKeys.delete(fid);
+  saveExpandedFolders();
   if (wasOpen) {
     codeFileScope = "workspace";
     activeFolderId = "";
@@ -4036,6 +4044,7 @@ function toggleFolderExpanded(folder) {
   const key = String(folder.folderId);
   if (expandedFolderKeys.has(key)) expandedFolderKeys.delete(key);
   else expandedFolderKeys.add(key);
+  saveExpandedFolders();
   renderFolders();
 }
 
@@ -4319,13 +4328,17 @@ function renderFolders() {
         row.append(empty, create);
         list.append(row);
       } else {
-        const labels = isOpen ? languageState(language).labels : {};
+        const liveLabels = isOpen ? languageState(language).labels : {};
         const activeFile = currentActiveFile();
         const manageable = isOpen || isAuthed();
         for (const filename of names) {
+          // Show the problem name even when the folder isn't the open scope, by
+          // deriving it from the folder's persisted problem list.
+          const problemName = folderProblemNameFor(filename, folder.problems);
+          const label = liveLabels[filename] || (problemName ? `${filename} - ${problemName}` : filename);
           const isActive = isOpen && editorView === "code" && filename === activeFile;
           const ctx = { language: els.language.value, scope: "folder", contestId: fid, filename };
-          const row = createManagedFileRow(ctx, labels[filename] || filename, isActive, () => openFolder(folder, filename), manageable);
+          const row = createManagedFileRow(ctx, label, isActive, () => openFolder(folder, filename), manageable);
           list.append(row);
         }
       }
