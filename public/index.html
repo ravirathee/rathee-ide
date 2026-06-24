@@ -371,7 +371,10 @@
               </div>
               <div id="expectedResizeHandle" class="resize-handle horizontal-handle expected-resize-handle" title="Resize expected output" hidden></div>
               <div id="expectedWrap" class="output-pane expected-wrap" hidden>
-                <div class="io-sublabel">Expected</div>
+                <div class="io-sublabel io-sublabel--row">
+                  <span>Expected</span>
+                  <button id="expectedPlacementBtn" class="io-placement-btn" type="button" title="Move Expected to the right" aria-label="Move Expected to the right">⇥</button>
+                </div>
                 <textarea id="expectedOutput" spellcheck="false" readonly aria-label="Expected output"></textarea>
               </div>
             </div>

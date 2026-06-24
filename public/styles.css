@@ -2038,6 +2038,41 @@ textarea,
 
 .io-sublabel[hidden] { display: none; }
 
+.io-sublabel--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Small arrow toggle to move the Expected pane to the right / back to bottom. */
+.io-placement-btn {
+  min-height: 0;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.io-placement-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Expected to the right of Your output (vs stacked below). */
+.output-body.expected-right { flex-direction: row; }
+
+.output-body.expected-right .expected-wrap {
+  border-top: 0;
+  border-left: 1px solid var(--line);
+}
+
+.output-body.expected-right .expected-resize-handle {
+  height: auto;
+  width: 7px;
+}
+
 .verdict-badge {
   margin-left: 8px;
   padding: 1px 9px;

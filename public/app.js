@@ -30,6 +30,7 @@ const els = {
   expectedOutput: document.querySelector("#expectedOutput"),
   expectedWrap: document.querySelector("#expectedWrap"),
   expectedResizeHandle: document.querySelector("#expectedResizeHandle"),
+  expectedPlacementBtn: document.querySelector("#expectedPlacementBtn"),
   outputBody: document.querySelector(".output-body"),
   yourOutputLabel: document.querySelector("#yourOutputLabel"),
   verdictBadge: document.querySelector("#verdictBadge"),
@@ -506,7 +507,8 @@ let layoutState = {
   showDebug: localStorage.getItem("rathee.showDebug") === "true",
   debugHeight: Number(localStorage.getItem("rathee.debugHeight") || 28),
   debugStackWidth: Number(localStorage.getItem("rathee.debugStackWidth") || 36),
-  expectedHeight: Number(localStorage.getItem("rathee.expectedHeight") || 40)
+  expectedHeight: Number(localStorage.getItem("rathee.expectedHeight") || 40),
+  expectedSide: localStorage.getItem("rathee.expectedSide") === "right" ? "right" : "bottom"
 };
 
 loadAppSettings().finally(boot);
@@ -1577,6 +1579,10 @@ function boot() {
   });
   els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
   els.copyOutputBtn.addEventListener("click", () => copyPaneText(els.output.value, els.copyOutputBtn));
+  els.expectedPlacementBtn?.addEventListener("click", () => {
+    layoutState.expectedSide = layoutState.expectedSide === "right" ? "bottom" : "right";
+    applyWorkspaceLayout();
+  });
   els.copyCodeBtn.addEventListener("click", () => copyPaneText(getCopyCode(), els.copyCodeBtn));
   els.copyDebugBtn.addEventListener("click", () => copyPaneText(combinedDebugText(), els.copyDebugBtn));
   els.hideDebugBtn.addEventListener("click", toggleDebugPanel);
@@ -2662,6 +2668,18 @@ function applyWorkspaceLayout() {
   document.querySelector(".editor-pane")?.style.setProperty("--debug-height", `${layoutState.debugHeight}%`);
   els.editorDebugPanel.style.setProperty("--debug-stack-width", `${layoutState.debugStackWidth}%`);
   els.outputSection.style.setProperty("--expected-height", `${layoutState.expectedHeight}%`);
+  const expectedRight = layoutState.expectedSide === "right";
+  if (els.outputBody) els.outputBody.classList.toggle("expected-right", expectedRight);
+  if (els.expectedResizeHandle) {
+    els.expectedResizeHandle.classList.toggle("vertical-handle", expectedRight);
+    els.expectedResizeHandle.classList.toggle("horizontal-handle", !expectedRight);
+  }
+  if (els.expectedPlacementBtn) {
+    els.expectedPlacementBtn.textContent = expectedRight ? "⤓" : "⇥";
+    const title = expectedRight ? "Move Expected below" : "Move Expected to the right";
+    els.expectedPlacementBtn.title = title;
+    els.expectedPlacementBtn.setAttribute("aria-label", title);
+  }
 
   els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
   els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
@@ -2681,6 +2699,7 @@ function applyWorkspaceLayout() {
   localStorage.setItem("rathee.debugHeight", String(layoutState.debugHeight));
   localStorage.setItem("rathee.debugStackWidth", String(layoutState.debugStackWidth));
   localStorage.setItem("rathee.expectedHeight", String(layoutState.expectedHeight));
+  localStorage.setItem("rathee.expectedSide", layoutState.expectedSide);
   scheduleAppSettingsSave();
 
   requestAnimationFrame(() => codeEditor?.refresh());
@@ -3188,8 +3207,12 @@ function startResize(event, target) {
       layoutState.debugStackWidth = clamp(startDebugStackWidth - ((moveEvent.clientX - startX) / debugRect.width) * 100, 22, 65);
     }
     if (target === "expected-split" && outputBodyRect?.height) {
-      // Expected sits below; dragging the handle up grows it.
-      layoutState.expectedHeight = clamp(startExpectedHeight - ((moveEvent.clientY - startY) / outputBodyRect.height) * 100, 15, 82);
+      // Expected sits below (bottom) or to the right; dragging the handle toward
+      // the editor (up / left) grows it. Same formula on the relevant axis.
+      const delta = layoutState.expectedSide === "right"
+        ? (moveEvent.clientX - startX) / outputBodyRect.width
+        : (moveEvent.clientY - startY) / outputBodyRect.height;
+      layoutState.expectedHeight = clamp(startExpectedHeight - delta * 100, 15, 82);
     }
     applyWorkspaceLayout();
   };
