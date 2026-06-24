@@ -2265,14 +2265,21 @@ function scheduleWorkspaceCodeSave() {
   const state = languageState(language);
   const filename = state.active;
   if (!filename) return;
-  clearTimeout(codeSaveTimer);
+  // Capture the full save target NOW. Resolving it inside the debounce instead
+  // let a scope switch within 350ms misroute the write (e.g. a folder file
+  // saved under a contest), polluting the contest with "1875A.cpp"-style files.
   const code = state.files[filename];
-  if (codeFileScope === "folder" && activeFolderId) {
-    touchFolderFile(activeFolderId, language, filename); // mark edited for the sort
-  }
+  const input = state.inputs[filename] || "";
+  const scope = codeFileScope;
+  const dbScope = scope === "workspace" ? "scratch" : scope;
+  const containerId = scope === "contest" ? activeContestId : scope === "folder" ? activeFolderId : "";
+  if (scope === "folder" && containerId) touchFolderFile(containerId, language, filename); // mark edited for sort
+  clearTimeout(codeSaveTimer);
   codeSaveTimer = setTimeout(() => {
-    const save = saveFunctionFor(language);
-    save(filename, code).catch(() => {
+    if (!isAuthed()) return; // anonymous: nothing persisted
+    if (dbScope !== "scratch" && !containerId) return; // need a container id
+    if (dbScope === "contest" && /^\d/.test(filename)) return; // contest files are index-only, never <id><index>
+    putMyFile(language, dbScope, filename, code, input, containerId).catch(() => {
       els.meta.textContent = `Could not save ${filename}`;
     });
   }, 350);
