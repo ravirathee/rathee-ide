@@ -8,7 +8,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   initStore, dbReady, upsertUser, getUserById,
-  listFiles, saveFile, deleteFile,
+  listFiles, saveFile, deleteFile, saveFileTests,
   listContests, addContest, removeContest,
   listFolders, addFolder, removeFolder, setFolderOrder,
   getSettings, saveSettings,
@@ -241,7 +241,8 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, {
           files: files.map((f) => ({
             language: f.language, scope: f.scope, contestId: f.contest_id,
-            filename: f.filename, content: f.content || "", input: f.input_text || ""
+            filename: f.filename, content: f.content || "", input: f.input_text || "",
+            tests: Array.isArray(f.tests) ? f.tests : null
           })),
           contests: contests.map((c) => ({
             contestId: c.contest_id, name: c.name, language: c.language,
@@ -257,6 +258,13 @@ const server = http.createServer(async (req, res) => {
         const b = await readJsonBody(req);
         if (!b || !b.language || !b.filename) return sendJson(res, 400, { error: "language and filename required" });
         await saveFile(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/file-tests") {
+        const b = await readJsonBody(req);
+        if (!b || !b.language || !b.filename) return sendJson(res, 400, { error: "language and filename required" });
+        await saveFileTests(uid, { ...b, tests: Array.isArray(b.tests) ? b.tests : [] });
         return sendJson(res, 200, { ok: true });
       }
 

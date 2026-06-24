@@ -327,8 +327,8 @@
         <section id="sidePane" class="side-pane">
           <section class="io-pane">
           <div class="io-section input-section">
-            <div class="pane-head">
-              <span>Input</span>
+            <div class="pane-head io-head">
+              <div id="inputTabs" class="file-tabs io-tabs" role="tablist" aria-label="Test inputs"></div>
               <div class="pane-head-actions">
                 <button id="copyInputBtn" class="copy-button" title="Copy input" aria-label="Copy input">
                   <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -343,15 +343,14 @@
                 </button>
               </div>
             </div>
-            <div id="inputTabs" class="io-tabs" role="tablist" aria-label="Test inputs"></div>
             <textarea id="input" spellcheck="false" aria-label="Program input"></textarea>
           </div>
           <div id="ioResizeHandle" class="resize-handle horizontal-handle" title="Resize input and output"></div>
           <div class="io-section output-section">
-            <div class="pane-head">
-              <span>Output</span>
-              <span id="verdictBadge" class="verdict-badge" hidden></span>
+            <div class="pane-head io-head">
+              <div id="outputTabs" class="file-tabs io-tabs" role="tablist" aria-label="Test outputs"></div>
               <div class="pane-head-actions">
+                <span id="verdictBadge" class="verdict-badge" hidden></span>
                 <button id="copyOutputBtn" class="copy-button" title="Copy output" aria-label="Copy output">
                   <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
                     <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -365,12 +364,12 @@
                 </button>
               </div>
             </div>
-            <div id="outputTabs" class="io-tabs" role="tablist" aria-label="Test outputs"></div>
             <div class="output-body">
               <div class="output-pane">
                 <div class="io-sublabel" id="yourOutputLabel" hidden>Your output</div>
                 <textarea id="output" spellcheck="false" readonly aria-label="Program output"></textarea>
               </div>
+              <div id="expectedResizeHandle" class="resize-handle horizontal-handle expected-resize-handle" title="Resize expected output" hidden></div>
               <div id="expectedWrap" class="output-pane expected-wrap" hidden>
                 <div class="io-sublabel">Expected</div>
                 <textarea id="expectedOutput" spellcheck="false" readonly aria-label="Expected output"></textarea>

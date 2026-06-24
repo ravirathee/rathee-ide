@@ -1966,55 +1966,34 @@ textarea,
   grid-row: 3;
 }
 
-/* ---- Sample test tabs (Input / Output) ---- */
-/* io-section now has three rows: pane-head, the tab strip, then the content. */
-.io-section {
-  grid-template-rows: auto auto 1fr;
-}
-
-.io-section > .pane-head { grid-row: 1; }
-.io-tabs { grid-row: 2; }
-.input-section > textarea,
-.output-section > .output-body { grid-row: 3; min-height: 0; }
-
-.io-section.collapsed { grid-template-rows: auto; }
-.io-section.collapsed .io-tabs,
+/* ---- Test-case tabs (Input/Output) — styled like the editor's file tabs ---- */
+/* The tab strips live inside the pane-head, so the section is back to a simple
+   header + content grid. */
 .io-section.collapsed .output-body { display: none; }
 
-.io-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 5px 8px 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+/* Pane header that hosts the tab strip + the copy/hide actions. */
+.io-head {
+  padding: 5px 8px;
+  gap: 8px;
 }
 
-.io-tabs::-webkit-scrollbar { display: none; }
+.io-tabs {
+  flex: 1 1 auto;
+  gap: 6px;
+  min-height: 32px;
+}
+
 .io-tabs[hidden] { display: none; }
 
+/* Tabs reuse .file-tab; just tighten the size a touch for the I/O strip. */
 .io-tab {
-  flex: 0 0 auto;
-  padding: 3px 10px;
-  border: 1px solid var(--line);
-  border-bottom: 0;
-  border-radius: 7px 7px 0 0;
-  color: var(--muted);
-  background: var(--panel-2);
-  font-size: 0.72rem;
-  font-weight: 700;
-  cursor: pointer;
+  max-width: 150px;
+  font-size: 0.78rem;
 }
 
-.io-tab:hover { color: var(--text); }
-
-.io-tab.active {
-  color: var(--text);
-  background: var(--editor-bg);
-  border-color: var(--line-strong);
-}
-
-.io-tab--ac { border-color: #43a047 !important; color: #43a047; }
-.io-tab--wa { border-color: var(--danger) !important; color: var(--danger); }
+/* Verdict coloring wins over the active accent on Output tabs. */
+.io-tab--ac { border-color: #43a047 !important; color: #43a047 !important; background: rgba(67, 160, 71, 0.12) !important; }
+.io-tab--wa { border-color: var(--danger) !important; color: var(--danger) !important; background: rgba(var(--danger-rgb), 0.12) !important; }
 
 .output-body {
   display: flex;
@@ -2030,7 +2009,22 @@ textarea,
 }
 
 .output-pane[hidden] { display: none; }
-.expected-wrap { border-top: 1px solid var(--line); }
+
+/* Expected pane: resizable height (dragged via #expectedResizeHandle). */
+.expected-wrap {
+  flex: 0 0 var(--expected-height, 40%);
+  border-top: 1px solid var(--line);
+}
+
+.expected-wrap[hidden] { display: none; }
+
+.expected-resize-handle {
+  flex: 0 0 auto;
+  height: 7px;
+  margin: 0;
+}
+
+.expected-resize-handle[hidden] { display: none; }
 
 .io-sublabel {
   padding: 3px 12px;

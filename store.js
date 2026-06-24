@@ -39,6 +39,7 @@ const SCHEMA = [
      filename VARCHAR(255) NOT NULL,
      content LONGTEXT,
      input_text LONGTEXT,
+     tests JSON,
      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
      UNIQUE KEY uniq_file (user_id, language, scope, contest_id, filename),
      KEY idx_user (user_id),
@@ -125,6 +126,8 @@ async function applyMigrations() {
   await ensureColumn("user_folders", "problems", "JSON");
   // Drag-and-drop folder ordering.
   await ensureColumn("user_folders", "sort_order", "INT NOT NULL DEFAULT 0");
+  // Per-file editable test cases ([{input, expected}]).
+  await ensureColumn("files", "tests", "JSON");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
   await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
@@ -170,11 +173,24 @@ export async function getUserById(id) {
 // ---- Files (per user) ----
 export async function listFiles(userId) {
   const [rows] = await pool.query(
-    `SELECT language, scope, contest_id, filename, content, input_text, updated_at
+    `SELECT language, scope, contest_id, filename, content, input_text, tests, updated_at
      FROM files WHERE user_id = ? ORDER BY scope, contest_id, filename`,
     [userId]
   );
-  return rows;
+  return rows.map((r) => ({
+    ...r,
+    tests: typeof r.tests === "string" ? JSON.parse(r.tests || "null") : (r.tests || null)
+  }));
+}
+
+// Persist a file's editable test cases ([{input, expected}]). The file row is
+// created by saveFile first, so this only UPDATEs.
+export async function saveFileTests(userId, { language, scope = "scratch", contestId = "", filename, tests = [] }) {
+  await pool.query(
+    `UPDATE files SET tests = CAST(? AS JSON)
+     WHERE user_id = ? AND language = ? AND scope = ? AND contest_id = ? AND filename = ?`,
+    [JSON.stringify(tests), userId, language, scope, contestId || "", filename]
+  );
 }
 
 export async function saveFile(userId, { language, scope = "scratch", contestId = "", filename, content = "", input = "" }) {

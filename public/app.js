@@ -29,6 +29,8 @@ const els = {
   outputTabs: document.querySelector("#outputTabs"),
   expectedOutput: document.querySelector("#expectedOutput"),
   expectedWrap: document.querySelector("#expectedWrap"),
+  expectedResizeHandle: document.querySelector("#expectedResizeHandle"),
+  outputBody: document.querySelector(".output-body"),
   yourOutputLabel: document.querySelector("#yourOutputLabel"),
   verdictBadge: document.querySelector("#verdictBadge"),
   sidePane: document.querySelector("#sidePane"),
@@ -424,6 +426,7 @@ let uiZoom = clampZoom(Number(localStorage.getItem("rathee.uiZoom")) || 0.9);
 let codeEditor = null;
 let settingEditorValue = false;
 let codeSaveTimer = null;
+let testsSaveTimer = null;
 let currentLanguage = document.querySelector("#language").value;
 let editorQuickSettingsOpen = false;
 let settingsSaveTimer = null;
@@ -502,7 +505,8 @@ let layoutState = {
   inputHeight: Number(localStorage.getItem("rathee.inputHeight") || 45),
   showDebug: localStorage.getItem("rathee.showDebug") === "true",
   debugHeight: Number(localStorage.getItem("rathee.debugHeight") || 28),
-  debugStackWidth: Number(localStorage.getItem("rathee.debugStackWidth") || 36)
+  debugStackWidth: Number(localStorage.getItem("rathee.debugStackWidth") || 36),
+  expectedHeight: Number(localStorage.getItem("rathee.expectedHeight") || 40)
 };
 
 loadAppSettings().finally(boot);
@@ -1556,11 +1560,19 @@ function boot() {
   els.hideInputBtn.addEventListener("click", () => togglePanel("input"));
   els.hideOutputBtn.addEventListener("click", () => togglePanel("output"));
   els.input.addEventListener("input", () => {
-    if (els.input.readOnly || editorView !== "code") return; // sample inputs are fixed
-    const state = languageState();
-    if (state.active && activeTests()[activeTestIndex]?.kind === "custom") {
-      state.inputs[state.active] = els.input.value;
-      scheduleWorkspaceCodeSave();
+    if (editorView !== "code" || !currentActiveFile()) return;
+    const tests = activeFileTests();
+    if (tests[activeTestIndex]) {
+      tests[activeTestIndex].input = els.input.value;
+      persistActiveTests();
+    }
+  });
+  els.expectedOutput.addEventListener("input", () => {
+    if (editorView !== "code" || !currentActiveFile()) return;
+    const tests = activeFileTests();
+    if (tests[activeTestIndex]) {
+      tests[activeTestIndex].expected = els.expectedOutput.value;
+      persistActiveTests();
     }
   });
   els.copyInputBtn.addEventListener("click", () => copyPaneText(els.input.value, els.copyInputBtn));
@@ -2003,7 +2015,7 @@ async function fetchScratchFiles(language) {
   if (!res.ok) throw new Error(data.error || "Could not load your files.");
   return (data.files || [])
     .filter((f) => f.language === language && f.scope === "scratch")
-    .map((f) => ({ filename: f.filename, code: f.content || "", input: f.input || "" }));
+    .map((f) => ({ filename: f.filename, code: f.content || "", input: f.input || "", tests: f.tests || null }));
 }
 
 async function loadWorkspaceCppFiles() {
@@ -2018,7 +2030,7 @@ async function loadWorkspaceCppFiles() {
     openCppTabs = cppFileNames.slice();
 
     cppInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
-    cppSamples = {}; // scratch files have no Codeforces sample tests
+    cppSamples = buildTestsMap(files);
     cppTabLabels = Object.fromEntries(cppFileNames.map((name) => [name, name]));
     cppProblems = Object.fromEntries(cppFileNames.map((name) => [name, null]));
     activeCppFile = cppFileNames.includes(activeCppFile) ? activeCppFile : cppFileNames[0] || "";
@@ -2052,7 +2064,7 @@ async function loadWorkspacePythonFiles() {
     openPyTabs = pyFileNames.slice();
 
     pyInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
-    pySamples = {};
+    pySamples = buildTestsMap(files);
     pyTabLabels = Object.fromEntries(pyFileNames.map((name) => [name, name]));
     pyProblems = Object.fromEntries(pyFileNames.map((name) => [name, null]));
     activePyFile = pyFileNames.includes(activePyFile) ? activePyFile : pyFileNames[0] || "";
@@ -2084,7 +2096,7 @@ async function loadWorkspaceJavaFiles() {
     openJavaTabs = javaFileNames.slice();
 
     javaInputs = Object.fromEntries(files.map((f) => [f.filename, f.input || ""]));
-    javaSamples = {};
+    javaSamples = buildTestsMap(files);
     javaTabLabels = Object.fromEntries(javaFileNames.map((name) => [name, name]));
     javaProblems = Object.fromEntries(javaFileNames.map((name) => [name, null]));
     activeJavaFile = javaFileNames.includes(activeJavaFile) ? activeJavaFile : javaFileNames[0] || "";
@@ -2623,6 +2635,7 @@ function applyWorkspaceLayout() {
   layoutState.inputHeight = clamp(layoutState.inputHeight, 18, 78);
   layoutState.debugHeight = clamp(layoutState.debugHeight, 14, 55);
   layoutState.debugStackWidth = clamp(layoutState.debugStackWidth, 22, 65);
+  layoutState.expectedHeight = clamp(layoutState.expectedHeight, 15, 82);
 
   els.app.dataset.codeSide = layoutState.codeSide;
   els.app.style.setProperty("--drawer-width", `${layoutState.drawerWidth}px`);
@@ -2648,6 +2661,7 @@ function applyWorkspaceLayout() {
   document.querySelector(".editor-pane")?.classList.toggle("debug-hidden", !layoutState.showDebug);
   document.querySelector(".editor-pane")?.style.setProperty("--debug-height", `${layoutState.debugHeight}%`);
   els.editorDebugPanel.style.setProperty("--debug-stack-width", `${layoutState.debugStackWidth}%`);
+  els.outputSection.style.setProperty("--expected-height", `${layoutState.expectedHeight}%`);
 
   els.codeLeftBtn.classList.toggle("active", layoutState.codeSide === "left");
   els.codeRightBtn.classList.toggle("active", layoutState.codeSide === "right");
@@ -2666,6 +2680,7 @@ function applyWorkspaceLayout() {
   localStorage.setItem("rathee.showDebug", String(layoutState.showDebug));
   localStorage.setItem("rathee.debugHeight", String(layoutState.debugHeight));
   localStorage.setItem("rathee.debugStackWidth", String(layoutState.debugStackWidth));
+  localStorage.setItem("rathee.expectedHeight", String(layoutState.expectedHeight));
   scheduleAppSettingsSave();
 
   requestAnimationFrame(() => codeEditor?.refresh());
@@ -3133,6 +3148,7 @@ function initResizablePanes() {
   els.ioResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "io"));
   els.debugResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug"));
   els.debugSplitResizeHandle.addEventListener("pointerdown", (event) => startResize(event, "debug-split"));
+  els.expectedResizeHandle?.addEventListener("pointerdown", (event) => startResize(event, "expected-split"));
 }
 
 function startResize(event, target) {
@@ -3148,6 +3164,8 @@ function startResize(event, target) {
   const ioRect = els.ioPane.getBoundingClientRect();
   const editorRect = document.querySelector(".editor-pane")?.getBoundingClientRect();
   const debugRect = els.editorDebugPanel.getBoundingClientRect();
+  const outputBodyRect = els.outputBody?.getBoundingClientRect();
+  const startExpectedHeight = layoutState.expectedHeight;
   document.body.classList.add("resizing");
 
   const onMove = (moveEvent) => {
@@ -3168,6 +3186,10 @@ function startResize(event, target) {
     }
     if (target === "debug-split" && debugRect?.width) {
       layoutState.debugStackWidth = clamp(startDebugStackWidth - ((moveEvent.clientX - startX) / debugRect.width) * 100, 22, 65);
+    }
+    if (target === "expected-split" && outputBodyRect?.height) {
+      // Expected sits below; dragging the handle up grows it.
+      layoutState.expectedHeight = clamp(startExpectedHeight - ((moveEvent.clientY - startY) / outputBodyRect.height) * 100, 15, 82);
     }
     applyWorkspaceLayout();
   };
@@ -3538,7 +3560,7 @@ async function openAccountContest(contest, targetProblemIndex = "") {
     for (const f of data.files || []) {
       if (f.scope !== "contest" || String(f.contestId) !== contestId) continue;
       if (SUPPORTED_LANGUAGES.includes(f.language)) {
-        stored[f.language][f.filename] = { content: f.content || "", input: f.input || "" };
+        stored[f.language][f.filename] = { content: f.content || "", input: f.input || "", tests: f.tests || null };
       }
     }
     recentContest = {
@@ -3834,9 +3856,9 @@ function setArraysFromStored(stored, problemList = []) {
   cppFileNames = c.names; cppFiles = c.files; cppInputs = c.inputs; cppTabLabels = c.labels; cppProblems = c.problems; openCppTabs = c.names.slice();
   pyFileNames = p.names; pyFiles = p.files; pyInputs = p.inputs; pyTabLabels = p.labels; pyProblems = p.problems; openPyTabs = p.names.slice();
   javaFileNames = j.names; javaFiles = j.files; javaInputs = j.inputs; javaTabLabels = j.labels; javaProblems = j.problems; openJavaTabs = j.names.slice();
-  cppSamples = samplesForFiles(c.names, problemList);
-  pySamples = samplesForFiles(p.names, problemList);
-  javaSamples = samplesForFiles(j.names, problemList);
+  cppSamples = buildTestsMap(c.names.map((n) => ({ filename: n, input: c.inputs[n], tests: stored.cpp?.[n]?.tests })));
+  pySamples = buildTestsMap(p.names.map((n) => ({ filename: n, input: p.inputs[n], tests: stored.python?.[n]?.tests })));
+  javaSamples = buildTestsMap(j.names.map((n) => ({ filename: n, input: j.inputs[n], tests: stored.java?.[n]?.tests })));
   activeCppFile = cppFileNames[0] || "";
   activePyFile = pyFileNames[0] || "";
   activeJavaFile = javaFileNames[0] || "";
@@ -3851,7 +3873,7 @@ async function fetchFolderFiles(folderId) {
     for (const f of data.files || []) {
       if (f.scope === "folder" && String(f.contestId) === String(folderId)) {
         if (SUPPORTED_LANGUAGES.includes(f.language)) {
-          stored[f.language][f.filename] = { content: f.content || "", input: f.input || "" };
+          stored[f.language][f.filename] = { content: f.content || "", input: f.input || "", tests: f.tests || null };
         }
       }
     }
@@ -4089,7 +4111,9 @@ async function importIntoFolder(folder, rawUrl) {
         const name = uniqueFilenameFor(state.names, base, config.extension);
         created[language] = name;
         addFileToActiveFolderContext(language, name, state.template, input, `${name} - ${p.name}`, p);
-        currentSamplesMap(language)[name] = (p.samples || []).map((s) => ({ input: s.input || "", expected: s.output ?? "" }));
+        currentTestsMap(language)[name] = (p.samples && p.samples.length)
+          ? p.samples.map((s) => ({ input: s.input || "", expected: s.output ?? "" }))
+          : [{ input: input || "", expected: "" }];
       }
       if (!firstName) firstName = created[currentLanguageValue()] || created.cpp;
     }
@@ -4732,6 +4756,7 @@ function addNextCodeFile() {
   state.inputs[filename] = "";
   state.labels[filename] = filename;
   state.problems[filename] = null;
+  currentTestsMap(language)[filename] = [{ input: "", expected: "" }];
   state.setActive(filename);
   editorView = "code";
   renderFileTabs();
@@ -4880,10 +4905,8 @@ function saveCurrentState(options = {}) {
   const state = languageState();
   if (!state.active) return;
   state.files[state.active] = value;
-  // els.input holds the active test's input; only the Custom tab maps to the
-  // file's saved input (sample inputs are read-only and live in the samples map).
-  const tests = activeTests();
-  if (tests[activeTestIndex]?.kind === "custom") state.inputs[state.active] = els.input.value;
+  // Test inputs/expected are owned by the tests maps and persisted separately
+  // (persistActiveTests); here we only persist the code.
   scheduleWorkspaceCodeSave();
 }
 
@@ -5124,16 +5147,10 @@ function applyContestProblems(contest, options = {}) {
   cppFileNames = cpp.names; cppFiles = cpp.files; cppInputs = cpp.inputs; cppTabLabels = cpp.labels; cppProblems = cpp.map;
   pyFileNames = py.names; pyFiles = py.files; pyInputs = py.inputs; pyTabLabels = py.labels; pyProblems = py.map;
   javaFileNames = java.names; javaFiles = java.files; javaInputs = java.inputs; javaTabLabels = java.labels; javaProblems = java.map;
-  const buildContestSamples = (ext) => {
-    const m = {};
-    for (const pr of problems) {
-      if (Array.isArray(pr.samples) && pr.samples.length) {
-        m[`${pr.index}${ext}`] = pr.samples.map((s) => ({ input: s.input || "", expected: s.output ?? s.expected ?? "" }));
-      }
-    }
-    return m;
-  };
-  cppSamples = buildContestSamples(".cpp"); pySamples = buildContestSamples(".py"); javaSamples = buildContestSamples(".java");
+  const testsFromBuilt = (built, language) => buildTestsMap(built.names.map((n) => ({
+    filename: n, input: built.inputs[n] || "", tests: stored?.[language]?.[n]?.tests
+  })));
+  cppSamples = testsFromBuilt(cpp, "cpp"); pySamples = testsFromBuilt(py, "python"); javaSamples = testsFromBuilt(java, "java");
   openCppTabs = cpp.names.slice(); openPyTabs = py.names.slice(); openJavaTabs = java.names.slice();
   activeCppFile = cppFileNames[0] || "A.cpp";
   activePyFile = pyFileNames[0] || "A.py";
@@ -5471,35 +5488,46 @@ async function refreshCodeforcesStatus(showWhenEmpty) {
   }
 }
 
-// ---- Test cases (sample I/O tabs) ----------------------------------------
-// Each problem file can carry multiple Codeforces sample tests plus one editable
-// "Custom" test. The Input and Output tab strips are linked: selecting Input N
-// selects Output N. Run executes every sample, compares each to its expected
-// output, and colors the output tabs; Custom runs only when it's selected.
+// ---- Test cases (Input/Output tabs) --------------------------------------
+// Each file carries an editable list of test cases [{input, expected}], stored
+// per file in the DB (files.tests). The Input and Output tab strips are linked:
+// selecting Input N selects Output N. A ＋ tab adds a case; × deletes one. Run
+// executes every case; a case with a non-empty expected output gets a green/red
+// verdict on its Output tab. Build from each file's tests, seeding a single case
+// from the file's legacy input when none are stored.
 
-function currentSamplesMap(language = currentLanguageValue()) {
+function currentTestsMap(language = currentLanguageValue()) {
   return language === "python" ? pySamples : language === "java" ? javaSamples : cppSamples;
 }
 
-function activeFileSamples() {
-  const file = currentActiveFile();
-  return file ? (currentSamplesMap()[file] || []) : [];
+function buildTestsMap(entries) {
+  const map = {};
+  for (const e of entries) {
+    if (Array.isArray(e.tests) && e.tests.length) {
+      map[e.filename] = e.tests.map((t) => ({ input: t.input || "", expected: t.expected ?? t.output ?? "" }));
+    } else {
+      map[e.filename] = [{ input: e.input || "", expected: "" }];
+    }
+  }
+  return map;
 }
 
-// [ ...sample tests, custom test ] for the active file.
-function activeTests() {
+// The active file's test list (always at least one case; lazily seeded).
+function activeFileTests() {
   const file = currentActiveFile();
-  const samples = activeFileSamples();
-  const tests = samples.map((s, i) => ({ kind: "sample", n: i + 1, input: s.input || "", expected: s.expected || "" }));
-  tests.push({ kind: "custom", input: file ? (languageState().inputs[file] || "") : "" });
-  return tests;
+  if (!file) return [];
+  const map = currentTestsMap();
+  if (!Array.isArray(map[file]) || map[file].length === 0) {
+    map[file] = [{ input: languageState().inputs[file] || "", expected: "" }];
+  }
+  return map[file];
 }
 
 function clearTestRun() {
   testRun = { file: "", results: {}, customActual: null };
 }
 
-// Token/trailing-whitespace-insensitive comparison (standard CP checker rules).
+// Trailing-whitespace / trailing-newline-insensitive comparison (CP checker rules).
 function normalizeForCompare(text) {
   return String(text ?? "").replace(/\r\n/g, "\n").split("\n")
     .map((line) => line.replace(/\s+$/, "")).join("\n").replace(/\n+$/, "");
@@ -5514,34 +5542,81 @@ function selectTest(index) {
   refreshIoPanels();
 }
 
-function resultForActiveTest(test) {
+function resultForActiveTest() {
   if (testRun.file !== currentActiveFile()) return null;
-  if (test.kind === "custom") return testRun.customActual != null ? { actual: testRun.customActual } : null;
   return testRun.results[activeTestIndex] || null;
+}
+
+function addTest() {
+  const tests = activeFileTests();
+  if (!currentActiveFile()) return;
+  tests.push({ input: "", expected: "" });
+  activeTestIndex = tests.length - 1;
+  persistActiveTests();
+  refreshIoPanels();
+}
+
+function deleteTest(index) {
+  const tests = activeFileTests();
+  if (tests.length <= 1) return; // keep at least one
+  tests.splice(index, 1);
+  if (activeTestIndex >= tests.length) activeTestIndex = tests.length - 1;
+  clearTestRun();
+  persistActiveTests();
+  refreshIoPanels();
+}
+
+function persistActiveTests() {
+  const file = currentActiveFile();
+  if (!isAuthed() || !file) return;
+  const language = currentLanguageValue();
+  const scope = codeFileScope === "workspace" ? "scratch" : codeFileScope;
+  const contestId = codeFileScope === "contest" ? activeContestId : codeFileScope === "folder" ? activeFolderId : "";
+  const tests = (currentTestsMap()[file] || []).map((t) => ({ input: t.input || "", expected: t.expected || "" }));
+  clearTimeout(testsSaveTimer);
+  testsSaveTimer = setTimeout(() => {
+    fetch("/api/me/file-tests", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language, scope, contestId, filename: file, tests })
+    }).catch(() => {});
+  }, 400);
 }
 
 function refreshIoPanels() {
   if (!els.inputTabs || !els.outputTabs) return;
-  const tests = activeTests();
+  const file = currentActiveFile();
+  if (editorView !== "code" || !file) {
+    els.inputTabs.innerHTML = ""; els.outputTabs.innerHTML = "";
+    els.inputTabs.hidden = true; els.outputTabs.hidden = true;
+    els.input.value = file ? els.input.value : ""; els.input.readOnly = false;
+    els.expectedWrap.hidden = true; els.yourOutputLabel.hidden = true;
+    if (els.expectedResizeHandle) els.expectedResizeHandle.hidden = true;
+    if (!file) els.output.value = "";
+    updateVerdictBadge(null);
+    return;
+  }
+  const tests = activeFileTests();
   activeTestIndex = Math.min(Math.max(activeTestIndex, 0), tests.length - 1);
   renderTestTabs(tests);
   const test = tests[activeTestIndex];
-  const isSample = !!test && test.kind === "sample";
-  els.input.value = test ? test.input : "";
-  els.input.readOnly = isSample; // sample inputs are fixed; edit via the Custom tab
-  const result = test ? resultForActiveTest(test) : null;
+  els.input.value = test.input || "";
+  els.input.readOnly = false;
+  const result = resultForActiveTest();
   els.output.value = result?.actual ?? "";
-  els.expectedWrap.hidden = !isSample;
-  els.yourOutputLabel.hidden = !isSample;
-  if (isSample) els.expectedOutput.value = test.expected;
-  updateVerdictBadge(isSample ? result : null);
+  els.expectedWrap.hidden = false;
+  els.yourOutputLabel.hidden = false;
+  if (els.expectedResizeHandle) els.expectedResizeHandle.hidden = false;
+  els.expectedOutput.readOnly = false;
+  els.expectedOutput.value = test.expected || "";
+  const hasExpected = (test.expected || "").trim().length > 0;
+  updateVerdictBadge(hasExpected ? result : null);
 }
 
 function updateVerdictBadge(result) {
   const badge = els.verdictBadge;
   els.outputSection.classList.remove("verdict-ac", "verdict-wa");
   badge.classList.remove("ac", "wa");
-  if (!result || !result.verdict) { badge.hidden = true; return; }
+  if (!result || !result.verdict || result.verdict === "SKIP") { badge.hidden = true; return; }
   const ac = result.verdict === "AC";
   badge.hidden = false;
   badge.textContent = ac ? "✓ Matches expected" : (result.verdict === "ERR" ? "✗ Error" : "✗ Differs");
@@ -5555,22 +5630,40 @@ function renderTestTabs(tests) {
     tests.forEach((test, i) => {
       const tab = document.createElement("button");
       tab.type = "button";
-      tab.className = "io-tab";
-      tab.textContent = test.kind === "custom" ? "Custom" : `${prefix} ${test.n}`;
+      tab.className = "file-tab io-tab";
       tab.classList.toggle("active", i === activeTestIndex);
-      if (isOutput && test.kind === "sample" && testRun.file === currentActiveFile()) {
+      const label = document.createElement("span");
+      label.textContent = `${prefix} ${i + 1}`;
+      tab.append(label);
+      if (isOutput && testRun.file === currentActiveFile()) {
         const r = testRun.results[i];
-        if (r) tab.classList.add(r.verdict === "AC" ? "io-tab--ac" : "io-tab--wa");
+        if (r && (r.verdict === "AC" || r.verdict === "WA" || r.verdict === "ERR")) {
+          tab.classList.add(r.verdict === "AC" ? "io-tab--ac" : "io-tab--wa");
+        }
+      }
+      if (tests.length > 1) {
+        const del = document.createElement("span");
+        del.className = "tab-close";
+        del.textContent = "×";
+        del.title = "Delete this test case";
+        del.addEventListener("click", (event) => { event.stopPropagation(); deleteTest(i); });
+        tab.append(del);
       }
       tab.addEventListener("click", () => selectTest(i));
       container.append(tab);
     });
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "file-tab add-file-tab io-tab-add";
+    add.textContent = "+";
+    add.title = "Add a test case";
+    add.addEventListener("click", addTest);
+    container.append(add);
   };
   build(els.inputTabs, "Input", false);
   build(els.outputTabs, "Output", true);
-  const onlyCustom = tests.length <= 1; // no samples → keep the plain single-box look
-  els.inputTabs.hidden = onlyCustom;
-  els.outputTabs.hidden = onlyCustom;
+  els.inputTabs.hidden = false;
+  els.outputTabs.hidden = false;
 }
 
 async function runOneTest(language, code, input) {
@@ -5616,45 +5709,38 @@ async function submit(mode) {
   try {
     const code = getRunCode();
     const language = els.language.value;
-    const tests = activeTests();
-    const samples = tests.filter((t) => t.kind === "sample");
-    const activeTest = tests[activeTestIndex];
+    const tests = activeFileTests();
     testRun = { file: currentActiveFile(), results: {}, customActual: null };
 
-    let lastResult = null; // whose stderr/debug we surface in the debug pane
-    let hasErr = false;
-
-    // Always run every sample test and record a verdict per test.
-    if (samples.length) {
-      const results = await Promise.all(samples.map((s) => runOneTest(language, code, s.input)));
-      results.forEach((result, i) => {
-        const actual = result.output || "";
-        let verdict;
-        if (result.status !== "success") { verdict = "ERR"; hasErr = true; }
-        else verdict = outputsMatch(actual, samples[i].expected) ? "AC" : "WA";
-        testRun.results[i] = { actual, verdict };
-      });
-      lastResult = results[activeTestIndex] || results[0];
-    }
-
-    // Custom test runs only when it's the selected tab.
-    if (activeTest && activeTest.kind === "custom") {
-      const result = await runOneTest(language, code, activeTest.input);
-      testRun.customActual = result.output || "";
-      lastResult = result;
-      if (!samples.length && result.status !== "success") hasErr = true;
-    }
+    // Run every test case. A case with a non-empty expected output is checked
+    // (AC/WA); one without is just executed (no verdict).
+    const results = await Promise.all(tests.map((t) => runOneTest(language, code, t.input)));
+    let checked = 0, passed = 0, hasErr = false;
+    results.forEach((result, i) => {
+      const actual = result.output || "";
+      const expected = tests[i].expected || "";
+      let verdict;
+      if (result.status !== "success") { verdict = "ERR"; hasErr = true; }
+      else if (expected.trim()) { verdict = outputsMatch(actual, expected) ? "AC" : "WA"; checked++; if (verdict === "AC") passed++; }
+      else verdict = "SKIP";
+      testRun.results[i] = { actual, verdict };
+    });
+    const lastResult = results[activeTestIndex] || results[0];
 
     refreshIoPanels();
 
     const debugText = lastResult ? (lastResult.debug || lastResult.stderr || "") : "";
-    if (samples.length) {
-      const passed = Object.values(testRun.results).filter((r) => r.verdict === "AC").length;
-      const ok = !hasErr && passed === samples.length;
-      setStatus(hasErr ? "Error" : (ok ? "Accepted" : "Wrong answer"), ok ? "success" : "error");
-      els.meta.textContent = `Samples: ${passed}/${samples.length} passed`;
-      setDebuggerOutput(debugText || `Ran ${samples.length} sample test(s) — ${passed}/${samples.length} matched expected output.`);
-      showDebug(!ok);
+    if (hasErr) {
+      setStatus("Error", "error");
+      els.meta.textContent = "Run failed — see debugger";
+      setDebuggerOutput(debugText || "Compilation/runtime error.");
+      showDebug(true);
+    } else if (checked > 0) {
+      const ok = passed === checked;
+      setStatus(ok ? "Accepted" : "Wrong answer", ok ? "success" : "error");
+      els.meta.textContent = `Tests: ${passed}/${checked} passed`;
+      setDebuggerOutput(debugText || `Ran ${tests.length} test(s) — ${passed}/${checked} matched expected output.`);
+      showDebug(!ok && !!debugText);
     } else {
       const ok = lastResult ? lastResult.status === "success" : false;
       setStatus(labelForStatus(lastResult?.status), ok ? "success" : "error");
