@@ -128,6 +128,11 @@ const els = {
   status: document.querySelector("#statusPill"),
   meta: document.querySelector("#meta"),
   pollCountdown: document.querySelector("#pollCountdown"),
+  confirmOverlay: document.querySelector("#confirmOverlay"),
+  confirmTitle: document.querySelector("#confirmTitle"),
+  confirmMessage: document.querySelector("#confirmMessage"),
+  confirmOkBtn: document.querySelector("#confirmOkBtn"),
+  confirmCancelBtn: document.querySelector("#confirmCancelBtn"),
   runBtn: document.querySelector("#runBtn"),
   codeLeftBtn: document.querySelector("#codeLeftBtn"),
   codeRightBtn: document.querySelector("#codeRightBtn"),
@@ -3512,6 +3517,20 @@ function renderSavedContests() {
     button.append(chevron, label);
     button.addEventListener("click", () => toggleContestProblems(contest));
 
+    // Reload = Status for this contest's problems (with the same info tooltip).
+    const reloadWrap = document.createElement("div");
+    reloadWrap.className = "folder-reload-wrap";
+    const reloadBtn = document.createElement("button");
+    reloadBtn.type = "button";
+    reloadBtn.className = "temp-file-action folder-reload-btn contest-reload-btn";
+    reloadBtn.setAttribute("aria-label", `Refresh statuses in ${contest.name}`);
+    reloadBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>';
+    reloadBtn.addEventListener("click", (event) => { event.stopPropagation(); refreshRecentVerdicts(); });
+    const reloadTip = document.createElement("span");
+    reloadTip.className = "status-info-tip";
+    reloadTip.innerHTML = "Click to refresh the Codeforces <strong>status</strong> of <em>every problem</em> in this contest.";
+    reloadWrap.append(reloadBtn, reloadTip);
+
     // Delete-whole-contest icon (hover) — removes the contest and all its files.
     const del = document.createElement("button");
     del.type = "button";
@@ -3523,7 +3542,7 @@ function renderSavedContests() {
       deleteContest(contest);
     });
 
-    header.append(button, del);
+    header.append(button, reloadWrap, del);
     group.append(header);
 
     if (expanded) {
@@ -3610,7 +3629,41 @@ function shortenContestName(name) {
 // Delete an entire contest: its account rows (files + registration) when signed
 // in, plus its in-memory snapshot and drawer entry. If it's the open contest,
 // fall back to the temp workspace afterwards.
+// Promise-based confirmation modal with a blurred backdrop (like Settings).
+// Resolves true on confirm, false on cancel / backdrop / Escape.
+function openConfirm({ title = "Are you sure?", message = "", confirmLabel = "Delete" } = {}) {
+  return new Promise((resolve) => {
+    els.confirmTitle.textContent = title;
+    els.confirmMessage.innerHTML = message;
+    els.confirmOkBtn.textContent = confirmLabel;
+    els.confirmOverlay.hidden = false;
+    const cleanup = (result) => {
+      els.confirmOverlay.hidden = true;
+      els.confirmOkBtn.removeEventListener("click", onOk);
+      els.confirmCancelBtn.removeEventListener("click", onCancel);
+      els.confirmOverlay.removeEventListener("mousedown", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (event) => { if (event.target === els.confirmOverlay) cleanup(false); };
+    const onKey = (event) => { if (event.key === "Escape") cleanup(false); };
+    els.confirmOkBtn.addEventListener("click", onOk);
+    els.confirmCancelBtn.addEventListener("click", onCancel);
+    els.confirmOverlay.addEventListener("mousedown", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    els.confirmOkBtn.focus();
+  });
+}
+
 async function deleteContest(contest) {
+  const ok = await openConfirm({
+    title: "Delete contest",
+    message: `Delete contest <strong>${escapeHtml(contest.name || contest.contestId)}</strong> and all its files?`,
+    confirmLabel: "Delete"
+  });
+  if (!ok) return;
   const cid = String(contest.contestId || "");
   const wasOpen = codeFileScope === "contest" && String(activeContestId) === cid;
   if (isAuthed() && cid) {
@@ -4085,6 +4138,12 @@ function createFileInFolder(folder) {
 }
 
 async function deleteFolder(folder) {
+  const ok = await openConfirm({
+    title: "Delete folder",
+    message: `Delete folder <strong>${escapeHtml(folder.name)}</strong> and all its files?`,
+    confirmLabel: "Delete"
+  });
+  if (!ok) return;
   const fid = String(folder.folderId || "");
   const wasOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
   if (isAuthed() && fid) {

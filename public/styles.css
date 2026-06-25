@@ -348,6 +348,16 @@ h1 {
   transform: translateY(0);
 }
 
+/* Per-folder reload button reuses the info tooltip. */
+.folder-reload-wrap { position: relative; display: inline-flex; }
+.folder-reload-wrap .status-info-tip { width: 210px; }
+.folder-reload-wrap:hover .status-info-tip,
+.folder-reload-wrap:focus-within .status-info-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 /* Stylish cursive flourish on the "for CodeForces" tagline — the script font
    carries its own slant, so keep the CSS upright to avoid over-italicising. */
 .brand-cursive {
@@ -2524,6 +2534,61 @@ textarea,
   background: var(--scrim);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+/* Confirmation dialog (delete folder/contest) — blurred backdrop like Settings. */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+
+.confirm-overlay[hidden] { display: none; }
+
+.confirm-modal {
+  width: min(420px, 92vw);
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+}
+
+.confirm-modal h3 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.confirm-modal p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.confirm-modal p strong { color: var(--text); }
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-danger {
+  border-color: rgba(var(--danger-rgb), 0.6);
+  color: #fff;
+  background: var(--danger);
+}
+
+.confirm-danger:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  filter: brightness(1.05);
 }
 
 .settings-overlay[hidden] {
