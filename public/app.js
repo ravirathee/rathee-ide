@@ -4084,8 +4084,11 @@ function generateFolderId() {
 }
 
 function nextFolderName() {
+  // Smallest free number starting from 1: "Folder 1" if available, otherwise the
+  // first gap (e.g. 1–5 taken → "Folder 6"). Counts every existing folder name
+  // (active/archived/binned) as taken to avoid duplicates.
   const used = new Set(savedFolders.map((f) => f.name));
-  let n = savedFolders.length + 1;
+  let n = 1;
   while (used.has(`Folder ${n}`)) n += 1;
   return `Folder ${n}`;
 }
