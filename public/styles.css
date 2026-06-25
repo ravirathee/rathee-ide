@@ -890,7 +890,7 @@ button:disabled {
   justify-content: center;
   width: 26px;
   height: 26px;
-  margin-right: 8px;
+  margin-right: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -1002,7 +1002,12 @@ body.resizing .drawer-section-resize::after {
 .folder-header-controls {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
+  padding-right: 8px;
+}
+
+.folder-header-controls .contest-sort-dropdown {
+  padding-right: 0;
 }
 
 /* Active / Archived / Bin view toggles in the section headers. */
@@ -1041,7 +1046,7 @@ body.resizing .drawer-section-resize::after {
   background: rgba(var(--accent-rgb), 0.12);
 }
 
-.folder-sort-dropdown { padding-right: 2px; }
+.folder-sort-dropdown { padding-right: 0; }
 
 .folder-header-actions .folder-file-sort-dropdown { padding-right: 0; }
 .folder-file-sort-btn svg { display: block; }
