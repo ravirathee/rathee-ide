@@ -278,6 +278,11 @@ h1 {
   font-size: 0.78rem;
 }
 
+/* Post-submit verdict-refresh countdown in the status bar (red digit). */
+.poll-countdown { color: var(--muted); }
+.poll-countdown[hidden] { display: none; }
+.poll-countdown-num { color: var(--danger); font-weight: 800; }
+
 /* Stylish cursive flourish on the "for CodeForces" tagline — the script font
    carries its own slant, so keep the CSS upright to avoid over-italicising. */
 .brand-cursive {

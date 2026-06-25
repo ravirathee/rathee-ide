@@ -127,6 +127,7 @@ const els = {
   quickLanguage: document.querySelector("#quickLanguage"),
   status: document.querySelector("#statusPill"),
   meta: document.querySelector("#meta"),
+  pollCountdown: document.querySelector("#pollCountdown"),
   runBtn: document.querySelector("#runBtn"),
   codeLeftBtn: document.querySelector("#codeLeftBtn"),
   codeRightBtn: document.querySelector("#codeRightBtn"),
@@ -5757,9 +5758,18 @@ async function fetchContestStatuses({ onlyMissing = false } = {}) {
 }
 
 let submitPollGen = 0;
+
+function setPollCountdownUI(seconds) {
+  if (!els.pollCountdown) return;
+  if (seconds == null) { els.pollCountdown.hidden = true; els.pollCountdown.textContent = ""; return; }
+  els.pollCountdown.hidden = false;
+  els.pollCountdown.innerHTML = `refreshing status in <span class="poll-countdown-num">${seconds}</span>s`;
+}
+
 // After a submit, refresh the open folder/contest verdicts every 5s until the
 // submitted problem's verdict settles on a new (non-TESTING) result, or 1 minute
-// passes — whichever comes first. A newer submit supersedes any running poll.
+// passes. A red per-second countdown shows when the next refresh fires. A newer
+// submit supersedes any running poll.
 function pollStatusAfterSubmit(key) {
   const scope = codeFileScope;
   if (!key || (scope !== "folder" && scope !== "contest")) return;
@@ -5767,17 +5777,30 @@ function pollStatusAfterSubmit(key) {
   const baseline = problemVerdicts[key]?.verdict ?? null;
   const deadline = Date.now() + 60000;
   const gen = ++submitPollGen;
-  const tick = async () => {
-    if (gen !== submitPollGen || Date.now() >= deadline) return; // superseded or timed out
-    if (codeFileScope !== scope || (scope === "folder" ? activeFolderId : activeContestId) !== container) return; // navigated away
+  let countdown = 5;
+
+  const valid = () => gen === submitPollGen && Date.now() < deadline
+    && codeFileScope === scope && (scope === "folder" ? activeFolderId : activeContestId) === container;
+  const stop = () => { if (gen === submitPollGen) setPollCountdownUI(null); };
+
+  const step = async () => {
+    if (!valid()) { stop(); return; }
+    if (countdown > 0) {
+      setPollCountdownUI(countdown);
+      countdown -= 1;
+      setTimeout(step, 1000);
+      return;
+    }
+    // countdown hit 0 → refresh now
     if (scope === "folder") await fetchFolderStatuses();
     else await fetchContestStatuses();
-    if (gen !== submitPollGen) return;
+    if (!valid()) { stop(); return; }
     const current = problemVerdicts[key]?.verdict ?? null;
-    if (current !== baseline && current !== "TESTING") return; // settled on a new verdict → done
-    setTimeout(tick, 5000);
+    if (current !== baseline && current !== "TESTING") { stop(); return; } // settled
+    countdown = 5;
+    setTimeout(step, 0);
   };
-  setTimeout(tick, 5000); // first check after 5s (give Codeforces time to judge)
+  step();
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
