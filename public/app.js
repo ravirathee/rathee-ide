@@ -5757,6 +5757,23 @@ async function fetchContestStatuses({ onlyMissing = false } = {}) {
   await applyVerdictsForKeys([...keys], { onlyMissing });
 }
 
+// Problem keys (`${contestId}|${index}`) for the currently open folder/contest.
+function openScopeProblemKeys() {
+  const keys = new Set();
+  if (codeFileScope === "folder") {
+    const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
+    for (const lang of SUPPORTED_LANGUAGES) {
+      for (const fn of (folder?.files?.[lang] || [])) { const d = deriveProblemFromFilename(fn); if (d) keys.add(`${d.contestId}|${d.index}`); }
+      for (const fn of languageState(lang).names) { const d = deriveProblemFromFilename(fn); if (d) keys.add(`${d.contestId}|${d.index}`); }
+    }
+  } else if (codeFileScope === "contest" && activeContestId) {
+    for (const lang of SUPPORTED_LANGUAGES) {
+      for (const fn of languageState(lang).names) { const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase(); if (idx) keys.add(`${activeContestId}|${idx}`); }
+    }
+  }
+  return [...keys];
+}
+
 let submitPollGen = 0;
 
 function setPollCountdownUI(seconds) {
@@ -5778,6 +5795,7 @@ function pollStatusAfterSubmit(key) {
   const deadline = Date.now() + 60000;
   const gen = ++submitPollGen;
   let countdown = 5;
+  let refreshes = 0;
 
   const valid = () => gen === submitPollGen && Date.now() < deadline
     && codeFileScope === scope && (scope === "folder" ? activeFolderId : activeContestId) === container;
@@ -5795,8 +5813,13 @@ function pollStatusAfterSubmit(key) {
     if (scope === "folder") await fetchFolderStatuses();
     else await fetchContestStatuses();
     if (!valid()) { stop(); return; }
+    refreshes += 1;
     const current = problemVerdicts[key]?.verdict ?? null;
     if (current !== baseline && current !== "TESTING") { stop(); return; } // settled
+    // If everything in the folder/contest is accepted, stop after 4 refreshes.
+    const keys = openScopeProblemKeys();
+    const allAccepted = keys.length > 0 && keys.every((k) => problemVerdicts[k]?.verdict === "OK");
+    if (allAccepted && refreshes >= 4) { stop(); return; }
     countdown = 5;
     setTimeout(step, 0);
   };
