@@ -1471,9 +1471,7 @@ function boot() {
   els.cfSubmitBtn.addEventListener("click", submitToCodeforces);
   els.cfStatusBtn.addEventListener("click", () => {
     refreshCodeforcesStatus(true);
-    // Folder/contest scope: fetch verdicts for every problem and badge each row.
-    fetchFolderStatuses();
-    fetchContestStatuses();
+    refreshRecentVerdicts(); // refresh the open folder/contest badges from recent submissions
   });
   els.settingsBtn.addEventListener("click", () => showSettings(true));
   els.settingsCloseBtn.addEventListener("click", () => showSettings(false));
@@ -1695,6 +1693,7 @@ async function initAuth(justLoggedIn = false) {
   // Reload the scratch workspace from the right backend now auth is known.
   await Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles(), loadWorkspaceJavaFiles()]).catch(() => {});
   loadSavedContestList(); // empty when anonymous; the saved list when signed in
+  backgroundVerdictSync(); // progressively pull full verdict history in the background
   // On the very first load, if there are no files yet, reveal the editor settings
   // so the language picker is usable before creating the first file (the "Create
   // A.cpp/A.py" overlay otherwise sits over it).
@@ -4462,6 +4461,19 @@ function renderFolders() {
 
     const actions = document.createElement("div");
     actions.className = "temp-file-actions folder-header-actions";
+    // Per-folder reload = "Status" for this folder's problems (with info tooltip).
+    const reloadWrap = document.createElement("div");
+    reloadWrap.className = "folder-reload-wrap";
+    const reloadBtn = document.createElement("button");
+    reloadBtn.type = "button";
+    reloadBtn.className = "temp-file-action folder-reload-btn";
+    reloadBtn.setAttribute("aria-label", `Refresh statuses in ${folder.name}`);
+    reloadBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>';
+    reloadBtn.addEventListener("click", (event) => { event.stopPropagation(); fetchFolderStatusesFor(folder); });
+    const reloadTip = document.createElement("span");
+    reloadTip.className = "status-info-tip";
+    reloadTip.innerHTML = "Click to refresh the Codeforces <strong>status</strong> of <em>every problem</em> in this folder.";
+    reloadWrap.append(reloadBtn, reloadTip);
     const fileMode = folderFileSortMode(fid);
     const sortDropdown = document.createElement("div");
     sortDropdown.className = "contest-sort-dropdown folder-file-sort-dropdown";
@@ -4511,7 +4523,7 @@ function renderFolders() {
     delBtn.addEventListener("click", (event) => { event.stopPropagation(); deleteFolder(folder); });
 
     const revealed = folderActionsOpen.has(fid);
-    if (revealed) actions.append(importBtn, sortDropdown, renameBtn, delBtn);
+    if (revealed) actions.append(importBtn, reloadWrap, sortDropdown, renameBtn, delBtn);
     const actionsToggle = document.createElement("button");
     actionsToggle.type = "button";
     actionsToggle.className = "temp-file-action folder-actions-toggle";
@@ -5707,55 +5719,108 @@ function verdictDisplay(v) {
 // One bulk call gets the best verdict per problem (OK = ever accepted), then we
 // badge the given problem keys. relevantKeys also get a "No submission" marker
 // when absent from the history so the row shows a status.
-async function applyVerdictsForKeys(relevantKeys, { onlyMissing = false } = {}) {
-  if (!validCodeforcesHandle() || !relevantKeys.length) return;
-  if (onlyMissing && relevantKeys.every((k) => problemVerdicts[k])) return; // all cached
-  els.meta.textContent = "Fetching Codeforces verdicts...";
+async function fetchVerdictPage(from, count) {
+  const res = await fetch(`/api/codeforces/verdicts?handle=${encodeURIComponent(codeforcesHandle)}&from=${from}&count=${count}`);
+  const data = await res.json();
+  if (!res.ok || !data.verdicts) throw new Error(data.error || "Failed to fetch verdicts.");
+  return data; // { verdicts, returned, from, count }
+}
+
+// Merge a page's per-problem verdicts into problemVerdicts. "newer" pages (recent
+// pulls) may update a problem's latest verdict; "older" pages (full-sync
+// continuation) only fill gaps. OK is always sticky. Returns true if anything
+// changed (so we only persist/re-render on real changes).
+function mergeVerdictPage(pageVerdicts, { newer }) {
+  let changed = false;
+  for (const [k, v] of Object.entries(pageVerdicts || {})) {
+    const cur = problemVerdicts[k]?.verdict ?? null;
+    if (v === "OK") { if (cur !== "OK") { problemVerdicts[k] = { verdict: "OK" }; changed = true; } continue; }
+    if (cur === "OK") continue; // ever-accepted stays accepted
+    if (newer) { if (cur !== v) { problemVerdicts[k] = { verdict: v }; changed = true; } }
+    else if (cur == null) { problemVerdicts[k] = { verdict: v }; changed = true; }
+  }
+  return changed;
+}
+
+function getVerdictSyncState() {
+  try { return JSON.parse(localStorage.getItem("rathee.verdictSync") || "{}") || {}; } catch { return {}; }
+}
+function setVerdictSyncState(state) {
+  try { localStorage.setItem("rathee.verdictSync", JSON.stringify(state)); } catch { /* quota */ }
+}
+
+// Problem keys for the open folder/contest (for the "No submission" marker).
+function openScopeProblemKeys() {
+  const keys = new Set();
+  const addNames = (names) => { for (const fn of (names || [])) { const d = deriveProblemFromFilename(fn); if (d) keys.add(`${d.contestId}|${d.index}`); } };
+  if (codeFileScope === "folder" && activeFolderId) {
+    const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
+    for (const lang of SUPPORTED_LANGUAGES) { addNames(folder?.files?.[lang]); addNames(languageState(lang).names); }
+  } else if (codeFileScope === "contest" && activeContestId) {
+    for (const lang of SUPPORTED_LANGUAGES) for (const fn of languageState(lang).names) { const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase(); if (idx) keys.add(`${activeContestId}|${idx}`); }
+  }
+  return [...keys];
+}
+
+// Once the full history is synced, a problem with no record truly has no
+// submission — mark the open scope's such problems so the badge shows it.
+function markNoSubmissionForOpenScope() {
+  if (!getVerdictSyncState().fullySynced) return;
+  let changed = false;
+  for (const k of openScopeProblemKeys()) if (!problemVerdicts[k]) { problemVerdicts[k] = { verdict: null }; changed = true; }
+  if (changed) saveProblemVerdicts();
+}
+
+// Background full sync: page through the entire submission history 10k at a time,
+// ~10s apart, resuming across reloads via the persisted nextFrom. Runs only until
+// fully synced for the current handle; "recent" pulls keep it current after that.
+let verdictSyncTimer = null;
+async function backgroundVerdictSync() {
+  if (!isAuthed() || !validCodeforcesHandle()) return;
+  let st = getVerdictSyncState();
+  if (st.handle !== codeforcesHandle) { st = { handle: codeforcesHandle, fullySynced: false, nextFrom: 1 }; setVerdictSyncState(st); }
+  if (st.fullySynced) return;
+  const COUNT = 10000;
   try {
-    const res = await fetch(`/api/codeforces/verdicts?handle=${encodeURIComponent(codeforcesHandle)}`);
-    const result = await res.json();
-    if (!res.ok || !result.verdicts) throw new Error(result.error || "Failed");
-    for (const [k, v] of Object.entries(result.verdicts)) problemVerdicts[k] = { verdict: v };
-    for (const k of relevantKeys) if (!problemVerdicts[k]) problemVerdicts[k] = { verdict: null }; // No submission
-    saveProblemVerdicts();
+    const page = await fetchVerdictPage(st.nextFrom || 1, COUNT);
+    if (getVerdictSyncState().handle !== codeforcesHandle) return; // handle changed mid-flight
+    if (mergeVerdictPage(page.verdicts, { newer: false })) { saveProblemVerdicts(); renderFolders(); renderSavedContests(); }
+    if (page.returned >= COUNT) {
+      st.nextFrom = (st.nextFrom || 1) + COUNT;
+      setVerdictSyncState(st);
+      clearTimeout(verdictSyncTimer);
+      verdictSyncTimer = setTimeout(backgroundVerdictSync, 10000); // next 10k in 10s
+    } else {
+      st.fullySynced = true;
+      setVerdictSyncState(st);
+      markNoSubmissionForOpenScope();
+      renderFolders();
+      renderSavedContests();
+    }
+  } catch {
+    clearTimeout(verdictSyncTimer);
+    verdictSyncTimer = setTimeout(backgroundVerdictSync, 15000); // retry later
+  }
+}
+
+// Pull only the latest ~100 submissions and merge — used on import, the Status
+// button, per-folder reload, and the post-submit poll. Cheap and CF-friendly.
+async function refreshRecentVerdicts() {
+  if (!isAuthed() || !validCodeforcesHandle()) return;
+  try {
+    const page = await fetchVerdictPage(1, 100);
+    const changed = mergeVerdictPage(page.verdicts, { newer: true });
+    markNoSubmissionForOpenScope();
+    if (changed) saveProblemVerdicts();
     renderFolders();
     renderSavedContests();
-    els.meta.textContent = "Codeforces verdicts updated";
-  } catch {
-    els.meta.textContent = "Could not fetch Codeforces verdicts";
-  }
+  } catch { /* leave existing verdicts */ }
 }
 
-// Status / import (folder scope): verdicts for every problem in the open folder.
-async function fetchFolderStatuses({ onlyMissing = false } = {}) {
-  if (codeFileScope !== "folder" || !activeFolderId || !validCodeforcesHandle()) return;
-  const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
-  const keys = new Set();
-  const addNames = (names) => {
-    for (const fn of (names || [])) {
-      const d = deriveProblemFromFilename(fn);
-      if (d) keys.add(`${d.contestId}|${d.index}`);
-    }
-  };
-  for (const lang of SUPPORTED_LANGUAGES) {
-    addNames(folder?.files?.[lang]);
-    addNames(languageState(lang).names); // live arrays of the open folder
-  }
-  await applyVerdictsForKeys([...keys], { onlyMissing });
-}
-
-// Status / import (contest scope): verdicts for every problem in the open contest.
-async function fetchContestStatuses({ onlyMissing = false } = {}) {
-  if (codeFileScope !== "contest" || !activeContestId || !validCodeforcesHandle()) return;
-  const keys = new Set();
-  for (const lang of SUPPORTED_LANGUAGES) {
-    for (const fn of languageState(lang).names) {
-      const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase();
-      if (idx) keys.add(`${activeContestId}|${idx}`);
-    }
-  }
-  await applyVerdictsForKeys([...keys], { onlyMissing });
-}
+// Names kept for existing call sites; both now use the light recent pull.
+async function fetchFolderStatuses() { await refreshRecentVerdicts(); }
+async function fetchContestStatuses() { await refreshRecentVerdicts(); }
+async function fetchFolderStatusesFor() { await refreshRecentVerdicts(); }
 
 let submitPollGen = 0;
 

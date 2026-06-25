@@ -441,7 +441,9 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/codeforces/verdicts") {
       const handle = url.searchParams.get("handle") || "";
-      const result = await fetchCodeforcesVerdicts({ handle });
+      const from = url.searchParams.get("from") || "1";
+      const count = url.searchParams.get("count") || "10000";
+      const result = await fetchCodeforcesVerdicts({ handle, from, count });
       return sendJson(res, 200, result);
     }
 
@@ -693,37 +695,44 @@ function buildPlaceholderContest(contestId, contest, reason) {
   };
 }
 
-// Best verdict per problem across the user's whole (recent) submission history:
-// "OK" if the problem was ever accepted, otherwise the most recent verdict.
-// Returns { handle, verdicts: { "<contestId>|<INDEX>": verdict } }.
-async function fetchCodeforcesVerdicts({ handle }) {
+// Stateless: fetch ONE page of the user's submissions (from/count, newest-first)
+// and reduce it to a per-problem verdict map for that page — "OK" if accepted
+// anywhere in the page, else the newest verdict in the page. The client drives
+// pagination (full sync) and incremental "recent" pulls, and owns the merged map.
+// Returns { handle, from, count, returned, verdicts }.
+async function fetchCodeforcesVerdicts({ handle, from = 1, count = 10000 }) {
   if (!/^[A-Za-z0-9_.-]{3,24}$/.test(handle)) {
     throw new Error("Invalid Codeforces handle.");
   }
+  const fromN = Math.max(1, Number(from) || 1);
+  const countN = Math.max(1, Math.min(10000, Number(count) || 10000));
   const apiUrl = new URL("https://codeforces.com/api/user.status");
   apiUrl.searchParams.set("handle", handle);
-  apiUrl.searchParams.set("from", "1");
-  apiUrl.searchParams.set("count", "5000");
-  // Full-history fetch is a large response; allow more time than the default.
+  apiUrl.searchParams.set("from", String(fromN));
+  apiUrl.searchParams.set("count", String(countN));
   const { ok, status, data } = await httpsGetJson(apiUrl, {
     headers: { "User-Agent": "Forge-IDE/1.0" },
-    timeoutMs: 30000
+    timeoutMs: countN > 1000 ? 30000 : 12000
   });
   if (!ok || data?.status !== "OK") {
     throw new Error(data?.comment || `Codeforces status request failed with ${status}.`);
   }
+
   const verdicts = {};
-  // data.result is newest-first; first seen per problem = latest verdict, and an
-  // OK anywhere in the history overrides it.
-  for (const submission of data.result) {
+  const seen = new Set(); // first occurrence per problem in this page = newest
+  for (const submission of data.result) { // newest-first
     const cid = submission.problem?.contestId;
     const idx = submission.problem?.index;
     if (cid == null || !idx) continue;
     const key = `${cid}|${String(idx).toUpperCase()}`;
-    if (!(key in verdicts)) verdicts[key] = submission.verdict || "TESTING";
-    if (submission.verdict === "OK") verdicts[key] = "OK";
+    if (submission.verdict === "OK") { verdicts[key] = "OK"; seen.add(key); continue; }
+    if (!seen.has(key)) {
+      seen.add(key);
+      if (verdicts[key] !== "OK") verdicts[key] = submission.verdict || "TESTING";
+    }
   }
-  return { handle, verdicts };
+
+  return { handle, from: fromN, count: countN, returned: data.result.length, verdicts };
 }
 
 async function fetchCodeforcesStatus({ handle, contestId, index }) {
