@@ -11,6 +11,7 @@ const els = {
   foldersSection: document.querySelector("#foldersSection"),
   folderList: document.querySelector("#folderList"),
   addFolderBtn: document.querySelector("#addFolderBtn"),
+  addContestBtn: document.querySelector("#addContestBtn"),
   drawerSectionResize: document.querySelector("#drawerSectionResize"),
   contestSortDropdown: document.querySelector(".contest-sort-dropdown"),
   contestSortBtn: document.querySelector("#contestSortBtn"),
@@ -20,6 +21,10 @@ const els = {
   folderSortBtn: document.querySelector("#folderSortBtn"),
   folderSortMenu: document.querySelector("#folderSortMenu"),
   folderSortItems: Array.from(document.querySelectorAll(".folder-sort-item")),
+  contestArchiveToggle: document.querySelector("#contestArchiveToggle"),
+  contestBinToggle: document.querySelector("#contestBinToggle"),
+  folderArchiveToggle: document.querySelector("#folderArchiveToggle"),
+  folderBinToggle: document.querySelector("#folderBinToggle"),
   language: document.querySelector("#language"),
   code: document.querySelector("#code"),
   editorDebugPanel: document.querySelector("#editorDebugPanel"),
@@ -208,6 +213,8 @@ const contextSnapshots = new Map();
 const ICON_RENAME = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
 const ICON_DELETE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 const ICON_IMPORT = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const ICON_ARCHIVE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>';
+const ICON_RESTORE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
 // Names of the temporary workspace files, cached separately so the "Temporary
 // Code Files" list stays populated even while a contest is the active scope.
 let tempCppNames = [];
@@ -226,6 +233,12 @@ let contestSortMode = contestSortModes.includes(localStorage.getItem("rathee.con
   ? localStorage.getItem("rathee.contestSortMode")
   : "hosted";
 let expandedContestKeys = new Set();
+
+// Section views: Active / Archived / Bin, per section, persisted.
+const SECTION_VIEWS = ["active", "archived", "bin"];
+const VIEW_STATE = { active: "active", archived: "archived", bin: "deleted" };
+let contestView = SECTION_VIEWS.includes(localStorage.getItem("rathee.contestView")) ? localStorage.getItem("rathee.contestView") : "active";
+let folderView = SECTION_VIEWS.includes(localStorage.getItem("rathee.folderView")) ? localStorage.getItem("rathee.folderView") : "active";
 
 // Folder sort (alphabetical default) + per-folder file sort + file timestamps.
 const folderSortModes = ["alpha", "created", "edited"];
@@ -1466,6 +1479,7 @@ function boot() {
     }
   });
   if (els.addFolderBtn) els.addFolderBtn.addEventListener("click", createFolder);
+  if (els.addContestBtn) els.addContestBtn.addEventListener("click", startContestImport);
   initSectionResize();
   els.openTemplateFileBtn.addEventListener("click", () => openTemplateSettingsFile("template"));
   els.openHeadersFileBtn.addEventListener("click", () => openTemplateSettingsFile("headers"));
@@ -1535,6 +1549,10 @@ function boot() {
   els.folderSortItems.forEach((item) => {
     item.addEventListener("click", () => setFolderSortMode(item.dataset.sortValue));
   });
+  els.contestArchiveToggle?.addEventListener("click", () => setContestView(contestView === "archived" ? "active" : "archived"));
+  els.contestBinToggle?.addEventListener("click", () => setContestView(contestView === "bin" ? "active" : "bin"));
+  els.folderArchiveToggle?.addEventListener("click", () => setFolderView(folderView === "archived" ? "active" : "archived"));
+  els.folderBinToggle?.addEventListener("click", () => setFolderView(folderView === "bin" ? "active" : "bin"));
   els.profileBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleProfileMenu();
@@ -3421,6 +3439,7 @@ async function loadSavedContestList() {
       problemCount: (c.problems || []).length,
       files: filesByContest[String(c.contestId)] || { cpp: [], python: [], java: [] },
       savedAt: c.savedAt || "",
+      state: c.state || "active",
       account: true
     }));
     // Keep the Temporary Code Files cache fresh from the account too, so its list
@@ -3454,6 +3473,7 @@ async function loadSavedContestList() {
       problems: Array.isArray(f.problems) ? f.problems : [],
       createdAt: f.createdAt,
       lastEdited: lastEditedByFolder[String(f.folderId)] || (f.createdAt ? Date.parse(f.createdAt) : 0),
+      state: f.state || "active",
       files: filesByFolder[String(f.folderId)] || { cpp: [], python: [], java: [] }
     }));
     renderSavedContests();
@@ -3482,8 +3502,62 @@ function sortedSavedContests() {
   return list.sort((a, b) => (Number(b.contestId || 0) - Number(a.contestId || 0)) || byName(a, b));
 }
 
+function setContestView(view) {
+  contestView = SECTION_VIEWS.includes(view) ? view : "active";
+  localStorage.setItem("rathee.contestView", contestView);
+  renderSavedContests();
+}
+function setFolderView(view) {
+  folderView = SECTION_VIEWS.includes(view) ? view : "active";
+  localStorage.setItem("rathee.folderView", folderView);
+  renderFolders();
+}
+
+// Persist a contest/folder lifecycle state (active/archived/deleted) to the
+// account; if it's the open scope and we're moving it out of "active", leave it.
+function setContestStateRemote(contestId, state) {
+  if (isAuthed()) fetch("/api/me/contest/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contestId, state }) }).catch(() => {});
+}
+function setFolderStateRemote(folderId, state) {
+  if (isAuthed()) fetch("/api/me/folder/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folderId, state }) }).catch(() => {});
+}
+
+function changeContestState(contest, state) {
+  if (state !== "active" && codeFileScope === "contest" && String(activeContestId) === String(contest.contestId)) leaveScopeToWorkspace();
+  contest.state = state;
+  setContestStateRemote(contest.contestId, state);
+  renderSavedContests();
+}
+function changeFolderState(folder, state) {
+  if (state !== "active" && codeFileScope === "folder" && String(activeFolderId) === String(folder.folderId)) leaveScopeToWorkspace();
+  folder.state = state;
+  setFolderStateRemote(folder.folderId, state);
+  renderFolders();
+}
+
+// Leave the current contest/folder scope back to the workspace (used when the
+// open item is archived/binned so it disappears from the active view).
+function leaveScopeToWorkspace() {
+  codeFileScope = "workspace";
+  activeContestId = "";
+  activeContestDir = "";
+  activeFolderId = "";
+  if (isAuthed()) {
+    Promise.all([loadWorkspaceCppFiles(), loadWorkspacePythonFiles(), loadWorkspaceJavaFiles()]).catch(() => {});
+  } else if (!restoreContext("workspace")) {
+    cppFileNames = []; cppFiles = {}; cppInputs = {}; cppTabLabels = {}; cppProblems = {}; activeCppFile = ""; openCppTabs = [];
+    pyFileNames = []; pyFiles = {}; pyInputs = {}; pyTabLabels = {}; pyProblems = {}; activePyFile = ""; openPyTabs = [];
+    javaFileNames = []; javaFiles = {}; javaInputs = {}; javaTabLabels = {}; javaProblems = {}; activeJavaFile = ""; openJavaTabs = [];
+    renderCurrentContext();
+  } else {
+    renderCurrentContext();
+  }
+}
+
 function renderSavedContests() {
   els.savedContestList.innerHTML = "";
+  if (els.contestArchiveToggle) els.contestArchiveToggle.classList.toggle("active", contestView === "archived");
+  if (els.contestBinToggle) els.contestBinToggle.classList.toggle("active", contestView === "bin");
   els.contestSortItems.forEach((item) =>
     item.classList.toggle("active", item.dataset.sortValue === contestSortMode));
   if (!savedContests.length) {
@@ -3491,7 +3565,18 @@ function renderSavedContests() {
     return;
   }
   els.savedContestSection.hidden = false;
-  for (const contest of sortedSavedContests()) {
+  const viewContests = sortedSavedContests().filter((c) => (c.state || "active") === VIEW_STATE[contestView]);
+  if (!viewContests.length) {
+    const row = document.createElement("div");
+    row.className = "temp-file-empty-row";
+    const span = document.createElement("span");
+    span.className = "temp-file-empty";
+    span.textContent = contestView === "bin" ? "Bin is empty" : contestView === "archived" ? "No archived contests" : "No saved contests";
+    row.append(span);
+    els.savedContestList.append(row);
+    return;
+  }
+  for (const contest of viewContests) {
     const contestKey = contestKeyFor(contest);
     const expanded = expandedContestKeys.has(contestKey);
     const group = document.createElement("div");
@@ -3531,18 +3616,29 @@ function renderSavedContests() {
     reloadTip.innerHTML = "Click to refresh the Codeforces <strong>status</strong> of <em>every problem</em> in this contest.";
     reloadWrap.append(reloadBtn, reloadTip);
 
-    // Delete-whole-contest icon (hover) — removes the contest and all its files.
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "temp-file-action temp-file-delete contest-delete-btn";
-    del.title = `Delete contest ${contest.name}`;
-    del.innerHTML = ICON_DELETE;
-    del.addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteContest(contest);
-    });
+    // Actions vary by view: active → reload+archive+delete(→bin); archived →
+    // reload+restore+delete(→bin); bin → restore + delete-forever.
+    const mkBtn = (cls, html, title, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `temp-file-action ${cls}`;
+      b.title = title;
+      b.innerHTML = html;
+      b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); });
+      return b;
+    };
+    const acts = [];
+    if (contestView !== "bin") acts.push(reloadWrap);
+    if (contestView === "active") acts.push(mkBtn("", ICON_ARCHIVE, `Archive ${contest.name}`, () => changeContestState(contest, "archived")));
+    if (contestView !== "active") acts.push(mkBtn("", ICON_RESTORE, `Restore ${contest.name}`, () => changeContestState(contest, "active")));
+    acts.push(contestView === "bin"
+      ? mkBtn("temp-file-delete", ICON_DELETE, `Delete ${contest.name} permanently`, () => permanentlyDeleteContest(contest))
+      : mkBtn("temp-file-delete contest-delete-btn", ICON_DELETE, `Delete contest ${contest.name}`, () => deleteContest(contest)));
 
-    header.append(button, reloadWrap, del);
+    const actionBox = document.createElement("div");
+    actionBox.className = "saved-contest-actions";
+    actionBox.append(...acts);
+    header.append(button, actionBox);
     group.append(header);
 
     if (expanded) {
@@ -3657,11 +3753,27 @@ function openConfirm({ title = "Are you sure?", message = "", confirmLabel = "De
   });
 }
 
+// Delete = move the contest to the Bin (recoverable). Files are kept.
 async function deleteContest(contest) {
   const ok = await openConfirm({
     title: "Delete contest",
-    message: `Delete contest <strong>${escapeHtml(contest.name || contest.contestId)}</strong> and all its files?`,
+    message: `Move contest <strong>${escapeHtml(contest.name || contest.contestId)}</strong> to the Bin?`,
     confirmLabel: "Delete"
+  });
+  if (!ok) return;
+  changeContestState(contest, "deleted");
+  setStatus("Moved to Bin", "idle");
+  els.meta.textContent = `${contest.name} moved to Bin`;
+}
+
+// Permanently remove a contest from the Bin: its account rows (files +
+// registration) and in-memory entry. If it's the open contest, fall back to
+// the temp workspace afterwards.
+async function permanentlyDeleteContest(contest) {
+  const ok = await openConfirm({
+    title: "Delete permanently",
+    message: `Permanently delete contest <strong>${escapeHtml(contest.name || contest.contestId)}</strong> and all its files? This cannot be undone.`,
+    confirmLabel: "Delete forever"
   });
   if (!ok) return;
   const cid = String(contest.contestId || "");
@@ -4137,11 +4249,26 @@ function createFileInFolder(folder) {
   });
 }
 
+// Delete = move the folder to the Bin (recoverable). Files are kept.
 async function deleteFolder(folder) {
   const ok = await openConfirm({
     title: "Delete folder",
-    message: `Delete folder <strong>${escapeHtml(folder.name)}</strong> and all its files?`,
+    message: `Move folder <strong>${escapeHtml(folder.name)}</strong> to the Bin?`,
     confirmLabel: "Delete"
+  });
+  if (!ok) return;
+  changeFolderState(folder, "deleted");
+  setStatus("Moved to Bin", "idle");
+  els.meta.textContent = `${folder.name} moved to Bin`;
+}
+
+// Permanently remove a folder (from the Bin): its account rows + files. If it's
+// the open folder, fall back to the temp workspace afterwards.
+async function permanentlyDeleteFolder(folder) {
+  const ok = await openConfirm({
+    title: "Delete permanently",
+    message: `Permanently delete folder <strong>${escapeHtml(folder.name)}</strong> and all its files? This cannot be undone.`,
+    confirmLabel: "Delete forever"
   });
   if (!ok) return;
   const fid = String(folder.folderId || "");
@@ -4458,7 +4585,20 @@ function persistFolderOrder() {
 function renderFolders() {
   if (!els.folderList) return;
   els.folderList.innerHTML = "";
-  for (const folder of savedFolders) {
+  if (els.folderArchiveToggle) els.folderArchiveToggle.classList.toggle("active", folderView === "archived");
+  if (els.folderBinToggle) els.folderBinToggle.classList.toggle("active", folderView === "bin");
+  const viewFolders = savedFolders.filter((f) => (f.state || "active") === VIEW_STATE[folderView]);
+  if (savedFolders.length && !viewFolders.length) {
+    const row = document.createElement("div");
+    row.className = "temp-file-empty-row";
+    const span = document.createElement("span");
+    span.className = "temp-file-empty";
+    span.textContent = folderView === "bin" ? "Bin is empty" : folderView === "archived" ? "No archived folders" : "No folders";
+    row.append(span);
+    els.folderList.append(row);
+    return;
+  }
+  for (const folder of viewFolders) {
     const fid = String(folder.folderId);
     const expanded = expandedFolderKeys.has(fid);
     const isOpen = codeFileScope === "folder" && String(activeFolderId) === fid;
@@ -4574,15 +4714,28 @@ function renderFolders() {
     renameBtn.title = `Rename ${folder.name}`;
     renameBtn.innerHTML = ICON_RENAME;
     renameBtn.addEventListener("click", (event) => { event.stopPropagation(); beginRenameFolderInline(header, folder); });
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "temp-file-action temp-file-delete";
-    delBtn.title = `Delete ${folder.name}`;
-    delBtn.innerHTML = ICON_DELETE;
-    delBtn.addEventListener("click", (event) => { event.stopPropagation(); deleteFolder(folder); });
+    const mkFolderBtn = (cls, html, title, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `temp-file-action ${cls}`;
+      b.title = title;
+      b.innerHTML = html;
+      b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); });
+      return b;
+    };
+    const archiveBtn = mkFolderBtn("", ICON_ARCHIVE, `Archive ${folder.name}`, () => changeFolderState(folder, "archived"));
+    const restoreBtn = mkFolderBtn("", ICON_RESTORE, `Restore ${folder.name}`, () => changeFolderState(folder, "active"));
+    const delBtn = mkFolderBtn("temp-file-delete", ICON_DELETE, `Delete ${folder.name}`, () => deleteFolder(folder));
+    const destroyBtn = mkFolderBtn("temp-file-delete", ICON_DELETE, `Delete ${folder.name} permanently`, () => permanentlyDeleteFolder(folder));
 
+    // Actions per view: active → import/reload/sort/rename/archive/delete(→bin);
+    // archived → reload/restore/delete(→bin); bin → restore/delete-forever.
     const revealed = folderActionsOpen.has(fid);
-    if (revealed) actions.append(importBtn, reloadWrap, sortDropdown, renameBtn, delBtn);
+    if (revealed) {
+      if (folderView === "active") actions.append(importBtn, reloadWrap, sortDropdown, renameBtn, archiveBtn, delBtn);
+      else if (folderView === "archived") actions.append(reloadWrap, restoreBtn, delBtn);
+      else actions.append(restoreBtn, destroyBtn);
+    }
     const actionsToggle = document.createElement("button");
     actionsToggle.type = "button";
     actionsToggle.className = "temp-file-action folder-actions-toggle";
@@ -5294,6 +5447,69 @@ async function loadExistingContestFiles(contestId) {
     }
   }
   return stored;
+}
+
+// The import button in the Saved Contests header reveals a URL field to its
+// LEFT (the label/toggles/sort hide). The SAME button then imports the typed
+// contest (reusing the top-bar import). Clicking anywhere else restores it.
+let contestImportSession = null;
+function startContestImport() {
+  if (contestImportSession) { contestImportSession.submit(); return; }
+  const header = els.savedContestSection?.querySelector(".saved-contests-header");
+  const btn = els.addContestBtn;
+  if (!header || !btn) return;
+
+  // Hide everything except the import button itself. Use inline display:none so
+  // it beats class rules like `.contest-sort-dropdown { display: inline-flex }`.
+  const hidden = [];
+  const hide = (el) => {
+    if (el && el !== btn && el.style.display !== "none") {
+      hidden.push([el, el.style.display]);
+      el.style.display = "none";
+    }
+  };
+  for (const child of Array.from(header.children)) {
+    if (child.contains(btn)) {
+      for (const c of Array.from(child.children)) hide(c);
+    } else {
+      hide(child);
+    }
+  }
+
+  const input = document.createElement("input");
+  input.type = "url";
+  input.className = "temp-file-rename-input folder-import-input contest-import-input";
+  input.placeholder = "Paste a Codeforces contest URL…";
+  input.spellcheck = false;
+  input.autocomplete = "off";
+
+  let settled = false;
+  const teardown = () => {
+    contestImportSession = null;
+    input.remove();
+    for (const [el, display] of hidden) el.style.display = display;
+  };
+  const submit = () => {
+    if (settled) return;
+    const url = input.value.trim();
+    if (!url) { cancel(); return; }
+    settled = true;
+    teardown();
+    els.contestUrl.value = url;
+    importContest();
+  };
+  const cancel = () => { if (settled) return; settled = true; teardown(); };
+  contestImportSession = { submit, cancel };
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); submit(); }
+    else if (event.key === "Escape") { event.preventDefault(); cancel(); }
+  });
+  input.addEventListener("blur", () => setTimeout(cancel, 150)); // let the button's click land first
+
+  // Place the field to the left of the button, where the label/toggles were.
+  header.insertBefore(input, header.firstChild);
+  input.focus();
 }
 
 async function importContest() {

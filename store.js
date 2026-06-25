@@ -131,6 +131,9 @@ async function applyMigrations() {
   await ensureColumn("files", "tests", "JSON");
   // Track file creation time (for "recently created" sort; updated_at already exists).
   await ensureColumn("files", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+  // Lifecycle state for folders/contests: 'active' | 'archived' | 'deleted' (Bin).
+  await ensureColumn("user_folders", "state", "VARCHAR(16) NOT NULL DEFAULT 'active'");
+  await ensureColumn("user_contests", "state", "VARCHAR(16) NOT NULL DEFAULT 'active'");
   // Widen the files.scope enum to allow user-created folders, and the container
   // id column to fit folder ids. Both are safe to run repeatedly.
   await pool.query(`ALTER TABLE files MODIFY COLUMN language ENUM('cpp','python','java') NOT NULL`).catch(() => {});
@@ -215,13 +218,21 @@ export async function deleteFile(userId, { language, scope = "scratch", contestI
 // ---- Contests (per user) ----
 export async function listContests(userId) {
   const [rows] = await pool.query(
-    `SELECT contest_id, name, language, problems, added_at FROM user_contests WHERE user_id = ? ORDER BY added_at DESC`,
+    `SELECT contest_id, name, language, problems, state, added_at FROM user_contests WHERE user_id = ? ORDER BY added_at DESC`,
     [userId]
   );
   return rows.map((r) => ({
     ...r,
+    state: r.state || "active",
     problems: typeof r.problems === "string" ? JSON.parse(r.problems || "[]") : (r.problems || [])
   }));
+}
+
+export async function setContestState(userId, contestId, state) {
+  await pool.query(
+    `UPDATE user_contests SET state = ? WHERE user_id = ? AND contest_id = ?`,
+    [state, userId, String(contestId)]
+  );
 }
 
 export async function addContest(userId, { contestId, name = null, language = "cpp", problems = [] }) {
@@ -241,13 +252,21 @@ export async function removeContest(userId, contestId) {
 // ---- Folders (per user; user-created containers of code files) ----
 export async function listFolders(userId) {
   const [rows] = await pool.query(
-    `SELECT folder_id, name, problems, created_at FROM user_folders WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC`,
+    `SELECT folder_id, name, problems, state, created_at FROM user_folders WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC`,
     [userId]
   );
   return rows.map((r) => ({
     ...r,
+    state: r.state || "active",
     problems: typeof r.problems === "string" ? JSON.parse(r.problems || "[]") : (r.problems || [])
   }));
+}
+
+export async function setFolderState(userId, folderId, state) {
+  await pool.query(
+    `UPDATE user_folders SET state = ? WHERE user_id = ? AND folder_id = ?`,
+    [state, userId, String(folderId)]
+  );
 }
 
 // Persist the user's folder order: each folder's sort_order becomes its index

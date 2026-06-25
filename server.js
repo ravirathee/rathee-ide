@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import {
   initStore, dbReady, upsertUser, getUserById,
   listFiles, saveFile, deleteFile, saveFileTests,
-  listContests, addContest, removeContest,
-  listFolders, addFolder, removeFolder, setFolderOrder,
+  listContests, addContest, removeContest, setContestState,
+  listFolders, addFolder, removeFolder, setFolderOrder, setFolderState,
   getSettings, saveSettings,
   getTemplates, saveTemplate
 } from "./store.js";
@@ -247,9 +247,9 @@ const server = http.createServer(async (req, res) => {
           })),
           contests: contests.map((c) => ({
             contestId: c.contest_id, name: c.name, language: c.language,
-            problems: c.problems || [], savedAt: c.added_at
+            problems: c.problems || [], state: c.state || "active", savedAt: c.added_at
           })),
-          folders: folders.map((f) => ({ folderId: f.folder_id, name: f.name, problems: f.problems || [], createdAt: f.created_at })),
+          folders: folders.map((f) => ({ folderId: f.folder_id, name: f.name, problems: f.problems || [], state: f.state || "active", createdAt: f.created_at })),
           settings,
           templates
         });
@@ -296,10 +296,24 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
 
+      if (req.method === "PUT" && url.pathname === "/api/me/contest/state") {
+        const b = await readJsonBody(req);
+        if (!b || !b.contestId || !["active", "archived", "deleted"].includes(b.state)) return sendJson(res, 400, { error: "contestId and valid state required" });
+        await setContestState(uid, String(b.contestId), b.state);
+        return sendJson(res, 200, { ok: true });
+      }
+
       if (req.method === "PUT" && url.pathname === "/api/me/folder") {
         const b = await readJsonBody(req);
         if (!b || !b.folderId) return sendJson(res, 400, { error: "folderId required" });
         await addFolder(uid, b);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (req.method === "PUT" && url.pathname === "/api/me/folder/state") {
+        const b = await readJsonBody(req);
+        if (!b || !b.folderId || !["active", "archived", "deleted"].includes(b.state)) return sendJson(res, 400, { error: "folderId and valid state required" });
+        await setFolderState(uid, String(b.folderId), b.state);
         return sendJson(res, 200, { ok: true });
       }
 

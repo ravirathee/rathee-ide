@@ -164,17 +164,22 @@
             <div id="savedContestSection" class="saved-contests" hidden>
               <div class="saved-contests-header">
                 <span class="drawer-label">Saved Contests</span>
-                <div class="contest-sort-dropdown">
-                  <button id="contestSortBtn" class="contest-sort-button" type="button" title="Sort saved contests" aria-label="Sort saved contests" aria-expanded="false">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M4 6h16M7 12h10M10 18h4" />
-                    </svg>
-                  </button>
-                  <div id="contestSortMenu" class="contest-sort-menu" role="menu" hidden>
-                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="hosted">Recently hosted</button>
-                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="fetched">Recently fetched</button>
-                    <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="edited">Recently edited</button>
+                <div class="folder-header-controls">
+                  <button id="contestArchiveToggle" class="section-view-btn" type="button" title="Archived contests" aria-label="Archived contests">🗄</button>
+                  <button id="contestBinToggle" class="section-view-btn" type="button" title="Bin (deleted contests)" aria-label="Bin">🗑</button>
+                  <div class="contest-sort-dropdown">
+                    <button id="contestSortBtn" class="contest-sort-button" type="button" title="Sort saved contests" aria-label="Sort saved contests" aria-expanded="false">
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M4 6h16M7 12h10M10 18h4" />
+                      </svg>
+                    </button>
+                    <div id="contestSortMenu" class="contest-sort-menu" role="menu" hidden>
+                      <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="hosted">Recently hosted</button>
+                      <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="fetched">Recently fetched</button>
+                      <button class="contest-sort-item" type="button" role="menuitemradio" data-sort-value="edited">Recently edited</button>
+                    </div>
                   </div>
+                  <button id="addContestBtn" class="folder-add-button contest-import-add" type="button" title="Import a contest" aria-label="Import a contest"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
                 </div>
               </div>
               <div id="savedContestList" class="saved-contest-list"></div>
@@ -184,6 +189,8 @@
               <div class="saved-contests-header">
                 <span class="drawer-label">Folders</span>
                 <div class="folder-header-controls">
+                  <button id="folderArchiveToggle" class="section-view-btn" type="button" title="Archived folders" aria-label="Archived folders">🗄</button>
+                  <button id="folderBinToggle" class="section-view-btn" type="button" title="Bin (deleted folders)" aria-label="Bin">🗑</button>
                   <div class="contest-sort-dropdown folder-sort-dropdown">
                     <button id="folderSortBtn" class="contest-sort-button" type="button" title="Sort folders" aria-label="Sort folders" aria-expanded="false">
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
