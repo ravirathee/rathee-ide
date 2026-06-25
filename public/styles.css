@@ -283,6 +283,71 @@ h1 {
 .poll-countdown[hidden] { display: none; }
 .poll-countdown-num { color: var(--danger); font-weight: 800; }
 
+/* "i" info badge next to the Status button, with a hover/focus tooltip. */
+.status-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-info {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 0.74rem;
+  cursor: help;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+
+.status-info:hover,
+.status-info:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.status-info-tip {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  width: 248px;
+  padding: 10px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--panel-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.55;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity var(--t-fast), transform var(--t-fast), visibility var(--t-fast);
+  z-index: 100;
+}
+
+.status-info-tip strong { color: var(--accent); }
+
+.status-info:hover .status-info-tip,
+.status-info:focus .status-info-tip,
+.status-info:focus-within .status-info-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 /* Stylish cursive flourish on the "for CodeForces" tagline — the script font
    carries its own slant, so keep the CSS upright to avoid over-italicising. */
 .brand-cursive {

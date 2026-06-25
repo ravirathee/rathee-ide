@@ -5757,30 +5757,15 @@ async function fetchContestStatuses({ onlyMissing = false } = {}) {
   await applyVerdictsForKeys([...keys], { onlyMissing });
 }
 
-// Problem keys (`${contestId}|${index}`) for the currently open folder/contest.
-function openScopeProblemKeys() {
-  const keys = new Set();
-  if (codeFileScope === "folder") {
-    const folder = savedFolders.find((f) => String(f.folderId) === String(activeFolderId));
-    for (const lang of SUPPORTED_LANGUAGES) {
-      for (const fn of (folder?.files?.[lang] || [])) { const d = deriveProblemFromFilename(fn); if (d) keys.add(`${d.contestId}|${d.index}`); }
-      for (const fn of languageState(lang).names) { const d = deriveProblemFromFilename(fn); if (d) keys.add(`${d.contestId}|${d.index}`); }
-    }
-  } else if (codeFileScope === "contest" && activeContestId) {
-    for (const lang of SUPPORTED_LANGUAGES) {
-      for (const fn of languageState(lang).names) { const idx = String(fn).replace(/\.[^.]+$/, "").toUpperCase(); if (idx) keys.add(`${activeContestId}|${idx}`); }
-    }
-  }
-  return [...keys];
-}
-
 let submitPollGen = 0;
 
-function setPollCountdownUI(seconds) {
+function setPollCountdownUI(seconds, left) {
   if (!els.pollCountdown) return;
   if (seconds == null) { els.pollCountdown.hidden = true; els.pollCountdown.textContent = ""; return; }
   els.pollCountdown.hidden = false;
-  els.pollCountdown.innerHTML = `refreshing status in <span class="poll-countdown-num">${seconds}</span>s`;
+  els.pollCountdown.innerHTML =
+    `refreshing status in <span class="poll-countdown-num">${seconds}</span>s` +
+    ` · <span class="poll-countdown-num">${left}</span> refresh${left === 1 ? "" : "es"} left`;
 }
 
 // After a submit, refresh the open folder/contest verdicts every 5s until the
@@ -5794,17 +5779,18 @@ function pollStatusAfterSubmit(key) {
   const baseline = problemVerdicts[key]?.verdict ?? null;
   const deadline = Date.now() + 60000;
   const gen = ++submitPollGen;
+  const maxRefreshes = 5;
   let countdown = 5;
   let refreshes = 0;
 
-  const valid = () => gen === submitPollGen && Date.now() < deadline
+  const valid = () => gen === submitPollGen && Date.now() < deadline && refreshes < maxRefreshes
     && codeFileScope === scope && (scope === "folder" ? activeFolderId : activeContestId) === container;
   const stop = () => { if (gen === submitPollGen) setPollCountdownUI(null); };
 
   const step = async () => {
     if (!valid()) { stop(); return; }
     if (countdown > 0) {
-      setPollCountdownUI(countdown);
+      setPollCountdownUI(countdown, maxRefreshes - refreshes);
       countdown -= 1;
       setTimeout(step, 1000);
       return;
@@ -5812,14 +5798,11 @@ function pollStatusAfterSubmit(key) {
     // countdown hit 0 → refresh now
     if (scope === "folder") await fetchFolderStatuses();
     else await fetchContestStatuses();
-    if (!valid()) { stop(); return; }
+    if (gen !== submitPollGen) { stop(); return; }
     refreshes += 1;
     const current = problemVerdicts[key]?.verdict ?? null;
     if (current !== baseline && current !== "TESTING") { stop(); return; } // settled
-    // If everything in the folder/contest is accepted, stop after 4 refreshes.
-    const keys = openScopeProblemKeys();
-    const allAccepted = keys.length > 0 && keys.every((k) => problemVerdicts[k]?.verdict === "OK");
-    if (allAccepted && refreshes >= 4) { stop(); return; }
+    if (!valid()) { stop(); return; }
     countdown = 5;
     setTimeout(step, 0);
   };
