@@ -5589,6 +5589,9 @@ async function submitToCodeforces() {
   showDebug(true);
   setStatus("Submit opened", "idle");
   els.meta.textContent = `Code copied · submit ${problem.index} on Codeforces`;
+  // Poll this problem's verdict for up to a minute so the badge updates once
+  // the submission is judged, without a manual Status click.
+  pollStatusAfterSubmit(`${problem.contestId}|${String(problem.index).toUpperCase()}`);
 }
 
 async function copyActiveCode() {
@@ -5751,6 +5754,30 @@ async function fetchContestStatuses({ onlyMissing = false } = {}) {
     }
   }
   await applyVerdictsForKeys([...keys], { onlyMissing });
+}
+
+let submitPollGen = 0;
+// After a submit, refresh the open folder/contest verdicts every 5s until the
+// submitted problem's verdict settles on a new (non-TESTING) result, or 1 minute
+// passes — whichever comes first. A newer submit supersedes any running poll.
+function pollStatusAfterSubmit(key) {
+  const scope = codeFileScope;
+  if (!key || (scope !== "folder" && scope !== "contest")) return;
+  const container = scope === "folder" ? activeFolderId : activeContestId;
+  const baseline = problemVerdicts[key]?.verdict ?? null;
+  const deadline = Date.now() + 60000;
+  const gen = ++submitPollGen;
+  const tick = async () => {
+    if (gen !== submitPollGen || Date.now() >= deadline) return; // superseded or timed out
+    if (codeFileScope !== scope || (scope === "folder" ? activeFolderId : activeContestId) !== container) return; // navigated away
+    if (scope === "folder") await fetchFolderStatuses();
+    else await fetchContestStatuses();
+    if (gen !== submitPollGen) return;
+    const current = problemVerdicts[key]?.verdict ?? null;
+    if (current !== baseline && current !== "TESTING") return; // settled on a new verdict → done
+    setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 5000); // first check after 5s (give Codeforces time to judge)
 }
 
 async function refreshCodeforcesStatus(showWhenEmpty) {
