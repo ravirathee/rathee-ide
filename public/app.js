@@ -12,6 +12,8 @@ const els = {
   folderList: document.querySelector("#folderList"),
   addFolderBtn: document.querySelector("#addFolderBtn"),
   addContestBtn: document.querySelector("#addContestBtn"),
+  contestSectionLabel: document.querySelector("#contestSectionLabel"),
+  folderSectionLabel: document.querySelector("#folderSectionLabel"),
   drawerSectionResize: document.querySelector("#drawerSectionResize"),
   contestSortDropdown: document.querySelector(".contest-sort-dropdown"),
   contestSortBtn: document.querySelector("#contestSortBtn"),
@@ -3554,8 +3556,12 @@ function leaveScopeToWorkspace() {
   }
 }
 
+const CONTEST_LABELS = { active: "Saved Contests", archived: "Archived Contests", bin: "Deleted Contests" };
+const FOLDER_LABELS = { active: "Folders", archived: "Archived Folders", bin: "Deleted Folders" };
+
 function renderSavedContests() {
   els.savedContestList.innerHTML = "";
+  if (els.contestSectionLabel) els.contestSectionLabel.textContent = CONTEST_LABELS[contestView] || CONTEST_LABELS.active;
   if (els.contestArchiveToggle) els.contestArchiveToggle.classList.toggle("active", contestView === "archived");
   if (els.contestBinToggle) els.contestBinToggle.classList.toggle("active", contestView === "bin");
   els.contestSortItems.forEach((item) =>
@@ -4585,6 +4591,7 @@ function persistFolderOrder() {
 function renderFolders() {
   if (!els.folderList) return;
   els.folderList.innerHTML = "";
+  if (els.folderSectionLabel) els.folderSectionLabel.textContent = FOLDER_LABELS[folderView] || FOLDER_LABELS.active;
   if (els.folderArchiveToggle) els.folderArchiveToggle.classList.toggle("active", folderView === "archived");
   if (els.folderBinToggle) els.folderBinToggle.classList.toggle("active", folderView === "bin");
   const viewFolders = savedFolders.filter((f) => (f.state || "active") === VIEW_STATE[folderView]);

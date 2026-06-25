@@ -163,10 +163,10 @@
             <div id="tempFileList" class="contest-problem-list temp-file-list"></div>
             <div id="savedContestSection" class="saved-contests" hidden>
               <div class="saved-contests-header">
-                <span class="drawer-label">Saved Contests</span>
+                <span id="contestSectionLabel" class="drawer-label">Saved Contests</span>
                 <div class="folder-header-controls">
-                  <button id="contestArchiveToggle" class="section-view-btn" type="button" title="Archived contests" aria-label="Archived contests">🗄</button>
-                  <button id="contestBinToggle" class="section-view-btn" type="button" title="Bin (deleted contests)" aria-label="Bin">🗑</button>
+                  <button id="contestArchiveToggle" class="section-view-btn" type="button" title="Archived contests" aria-label="Archived contests"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg></button>
+                  <button id="contestBinToggle" class="section-view-btn" type="button" title="Bin (deleted contests)" aria-label="Bin"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                   <div class="contest-sort-dropdown">
                     <button id="contestSortBtn" class="contest-sort-button" type="button" title="Sort saved contests" aria-label="Sort saved contests" aria-expanded="false">
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -187,10 +187,10 @@
             <div id="drawerSectionResize" class="drawer-section-resize" title="Drag to resize"></div>
             <div id="foldersSection" class="folders-section">
               <div class="saved-contests-header">
-                <span class="drawer-label">Folders</span>
+                <span id="folderSectionLabel" class="drawer-label">Folders</span>
                 <div class="folder-header-controls">
-                  <button id="folderArchiveToggle" class="section-view-btn" type="button" title="Archived folders" aria-label="Archived folders">🗄</button>
-                  <button id="folderBinToggle" class="section-view-btn" type="button" title="Bin (deleted folders)" aria-label="Bin">🗑</button>
+                  <button id="folderArchiveToggle" class="section-view-btn" type="button" title="Archived folders" aria-label="Archived folders"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg></button>
+                  <button id="folderBinToggle" class="section-view-btn" type="button" title="Bin (deleted folders)" aria-label="Bin"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                   <div class="contest-sort-dropdown folder-sort-dropdown">
                     <button id="folderSortBtn" class="contest-sort-button" type="button" title="Sort folders" aria-label="Sort folders" aria-expanded="false">
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
