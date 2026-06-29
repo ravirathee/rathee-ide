@@ -32,7 +32,7 @@ setup without re-discovering it.
 |------|-------|
 | Hostname (mDNS) | `ravis-macbook-pro.local` |
 | Computer name | `Ravis-MacBook-Pro.local` |
-| LAN IP | `192.168.0.2` (stable — see DHCP reservation below) |
+| LAN IP | `192.168.0.8` (stable — see DHCP reservation below) |
 | Login user | `ravimacprobar` |
 | Home | `/Users/ravimacprobar` |
 | OS | macOS 15.5 (build 24F74) |
@@ -46,7 +46,7 @@ The **dev Mac** (where the code is edited) is a *different* machine:
 ### SSH access (from the dev Mac)
 
 ```bash
-ssh ravimacprobar@192.168.0.2          # or: ssh ravimacprobar@ravis-macbook-pro.local
+ssh ravimacprobar@192.168.0.8          # or: ssh ravimacprobar@ravis-macbook-pro.local
 ```
 
 Auth is by SSH key (`~/.ssh/id_ed25519` on the dev Mac, public key added to the
@@ -54,9 +54,8 @@ prod Mac's `~/.ssh/authorized_keys`). Password auth is also enabled as a fallbac
 
 ### Static LAN IP via DHCP reservation
 
-The prod Mac's Wi-Fi is set to **DHCP** (not a manually-typed static IP). The
-stable `192.168.0.2` comes from a **DHCP reservation on the router**
-(`192.168.0.1`) that pins IP `192.168.0.2` to MAC `14:7d:da:8d:f5:95`.
+The prod Mac's Wi-Fi is set to **DHCP** (not a manually-typed static IP). The stable `192.168.0.8` comes from a **DHCP reservation on the router**
+(`192.168.0.1`) that pins IP `192.168.0.8` to MAC `14:7d:da:8d:f5:95`.
 
 To reproduce on a new router / new machine:
 1. Find the Mac's Wi-Fi MAC: `networksetup -getmacaddress "Wi-Fi"`.
@@ -210,7 +209,7 @@ All deploys are **pull-based from GitHub** (`origin` =
 2. SSH into the **prod Mac** and run the deploy script:
 
 ```bash
-ssh ravimacprobar@192.168.0.2 'bash ~/deploy.sh'
+ssh ravimacprobar@192.168.0.8 'bash ~/deploy.sh'
 ```
 
 `~/deploy.sh` does:
@@ -295,7 +294,7 @@ Common failure modes:
 
 1. macOS Mac, create user `ravimacprobar`, enable Remote Login (SSH), add the dev
    Mac's SSH public key to `~/.ssh/authorized_keys`.
-2. Router: add DHCP reservation pinning the Mac's Wi-Fi MAC to `192.168.0.2`.
+2. Router: add DHCP reservation pinning the Mac's Wi-Fi MAC to `192.168.0.8`.
 3. Install Homebrew; `brew install node colima docker mysql cloudflared`.
 4. `git clone https://github.com/ravirathee/rathee-ide.git ~/rathee-ide`.
 5. Start Colima (`colima start`) and build the image
