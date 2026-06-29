@@ -649,23 +649,10 @@ async function fetchCodeforcesProblems(contestUrl) {
     if (contest) {
       return buildPlaceholderContest(contestId, contest, message);
     }
-    const fallback = await fetchCodeforcesProblemsFromProblemset(contestId).catch(() => null);
-    if (fallback) {
-      fallback.message = message;
-      return fallback;
-    }
     throw new Error(message);
   }
 
-  const contestInfo = data.result.contest || null;
-  const problemList = Array.isArray(data.result.problems) ? data.result.problems : [];
-  if (!problemList.length) {
-    const fallback = await fetchCodeforcesProblemsFromProblemset(contestId).catch(() => null);
-    if (fallback) return fallback;
-    return buildPlaceholderContest(contestId, contestInfo, "Problem data is not available yet.");
-  }
-
-  const problems = await Promise.all(problemList.map(async (problem) => ({
+  const problems = await Promise.all(data.result.problems.map(async (problem) => ({
     contestId: problem.contestId,
     index: problem.index,
     name: problem.name,
@@ -674,42 +661,15 @@ async function fetchCodeforcesProblems(contestUrl) {
     rating: problem.rating ?? null,
     samples: await fetchProblemSamples(problem.contestId || contestId, problem.index)
   })));
+
+  if (!problems.length) {
+    return buildPlaceholderContest(contestId, data.result.contest, "Problem data is not available yet.");
+  }
 
   return {
     contestId,
-    name: contestInfo?.name || `Codeforces ${contestId}`,
-    phase: contestInfo?.phase || "",
-    problems
-  };
-}
-
-async function fetchCodeforcesProblemsFromProblemset(contestId) {
-  const apiUrl = new URL("https://codeforces.com/api/problemset.problems");
-  const { ok, status, data } = await httpsGetJson(apiUrl, {
-    headers: {
-      "User-Agent": "Forge-IDE/1.0"
-    }
-  });
-  if (!ok || data?.status !== "OK" || !Array.isArray(data.result?.problems)) return null;
-
-  const contestProblems = data.result.problems.filter((problem) => String(problem.contestId) === String(contestId));
-  if (!contestProblems.length) return null;
-
-  const contestInfo = await fetchCodeforcesContestInfo(contestId).catch(() => null);
-  const problems = await Promise.all(contestProblems.map(async (problem) => ({
-    contestId: problem.contestId,
-    index: problem.index,
-    name: problem.name,
-    type: problem.type,
-    points: problem.points ?? null,
-    rating: problem.rating ?? null,
-    samples: await fetchProblemSamples(problem.contestId || contestId, problem.index)
-  })));
-
-  return {
-    contestId: Number(contestId),
-    name: contestInfo?.name || `Codeforces ${contestId}`,
-    phase: contestInfo?.phase || "",
+    name: data.result.contest?.name || `Codeforces ${contestId}`,
+    phase: data.result.contest?.phase || "",
     problems
   };
 }
